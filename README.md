@@ -1,7 +1,7 @@
 
 # STM-Auto: Oil Monitor System
 
-A temperature monitoring system for the SWEE.BRZ vehicle using an STM32 Blue Pill microcontroller.
+This is a temperature monitoring system for the SWEE.BRZ vehicle using an STM32 Blue Pill microcontroller.
 
 ## Overview
 
