@@ -7,6 +7,9 @@
 
 // ========== CONFIGURATION ==========
 
+// ----- BUILT IN LED -----
+const uint8_t PIN_STATUSLED = LED_BUILTIN;
+
 // ----- OLED Screen -----
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -15,8 +18,8 @@
 #define OLED_SDA_PIN PB11
 #define OLED_SCL_PIN PB10
 
-TwoWire Wire2(OLED_SDA_PIN, OLED_SCL_PIN); 
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire2, OLED_RESET);
+TwoWire OLED_I2C(OLED_SDA_PIN, OLED_SCL_PIN); 
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &OLED_I2C, OLED_RESET);
 
 // ----- TEMPERATURE Sensor -----
 const uint8_t TEMP_SENSOR_PIN  = PA1;
@@ -38,14 +41,28 @@ const float TEMP_RESISTANCE_THRESHOLD = 1000.0f; // Adjust according to actual m
 
 // ========== SETUP ==========
 
+void blinkErrorLED() {
+    while (true) {
+        digitalWrite(PIN_STATUSLED, HIGH);
+        delay(250);
+        digitalWrite(PIN_STATUSLED, LOW);
+        delay(250);
+    }
+}
+
 void setup() {
     Serial.begin(115200);
 
+    delay(500); // important to let the screen initialize
+    
+    // ----- Built in initialization -----
+    pinMode(PIN_STATUSLED, OUTPUT);
+    digitalWrite(PIN_STATUSLED, HIGH); // High is off for the built-in LED
+
     // ----- OLED Screen initialization -----
-    Wire2.begin(); // I2C at 400kHz by default (smoother display)
+    OLED_I2C.begin(); // I2C at 400kHz by default (smoother display)
     if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
-        Serial.println(F("SSD1306 allocation failed"));
-        for(;;); // loop forever
+        blinkErrorLED();
     }
 
     display.clearDisplay();
