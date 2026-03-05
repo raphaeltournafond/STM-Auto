@@ -3,3 +3,7 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+kicad/stm-auto/fp-info-cache
+kicad/stm-auto/stm-auto-backups/
+kicad/stm-auto/~*.lck
+.DS_Store
