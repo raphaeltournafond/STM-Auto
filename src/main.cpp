@@ -24,6 +24,13 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &OLED_I2C, OLED_RESET);
 // ----- TEMPERATURE Sensor -----
 const uint8_t TEMP_SENSOR_PIN  = PA1;
 const float TEMP_SERIES_RESISTOR = 220.0f;
+// Calibration
+const float tempTable[] =  {40, 60, 80, 100, 120, 140, 150};
+const float resTable[]  =  {925,438,224,120, 68,  41,  32};
+const uint8_t tableSize = sizeof(tempTable) / sizeof(tempTable[0]);
+// Threshold
+const float SENSOR_MAX_SAFE_RESISTANCE = 1500.0f; // If the sensor reads above this resistance, it is likely disconnected/failed/oil temp is very low.
+const float TEMPERATURE_THRESHOLD = 90.0f; // Adjust according to actual measurement
 
 // ----- FLAP Servos -----
 const uint8_t RED_SERVO_PIN = PA6;
@@ -34,9 +41,6 @@ Servo redServo;
 // ----- HARDWARE Constants -----
 const float VREF = 3.3f;
 const uint16_t ADC_MAX = 4095;
-
-// ----- THRESHOLD Controls -----
-const float TEMP_RESISTANCE_THRESHOLD = 1000.0f; // Adjust according to actual measurement
 
 
 // ========== SETUP ==========
@@ -94,15 +98,41 @@ float readTemperatureResistance() {
     return resistance;
 }
 
-void updateServo(float resistance) {
-    if (resistance < TEMP_RESISTANCE_THRESHOLD) {
+float resistanceToTemperature(float resistance) {
+    if (resistance >= SENSOR_MAX_SAFE_RESISTANCE) {
+        return tempTable[tableSize - 1]; // likely disconnected or very low temp, return highest temp to open flap for safety
+    }
+
+    // Clamp outside range
+    if (resistance >= resTable[0]) return tempTable[0];
+    if (resistance <= resTable[tableSize - 1]) return tempTable[tableSize - 1];
+
+    for (uint8_t i = 0; i < tableSize - 1; i++) {
+        if (resistance <= resTable[i] && resistance >= resTable[i + 1]) {
+
+            float r1 = resTable[i];
+            float r2 = resTable[i + 1];
+            float t1 = tempTable[i];
+            float t2 = tempTable[i + 1];
+
+            // Linear interpolation
+            float ratio = (resistance - r1) / (r2 - r1);
+            return t1 + ratio * (t2 - t1);
+        }
+    }
+
+    return tempTable[tableSize - 1]; // fallback to highest temp for safety
+}
+
+void updateServo(float temperature) {
+    if (temperature >= TEMPERATURE_THRESHOLD) {
         redServo.write(RED_SERVO_OPEN);
     } else {
         redServo.write(RED_SERVO_CLOSED);
     }
 }
 
-void updateDisplay(float resistance) {
+void updateDisplay(float temperature, float resistance) {
     display.clearDisplay();
     display.setTextColor(SSD1306_WHITE);
 
@@ -112,16 +142,23 @@ void updateDisplay(float resistance) {
     display.println("SWEE.BRZ OIL MONITOR");
 
     // ----- TEMPERATURE -----
-    display.setTextSize(2);
-    display.setCursor(0, 20);
-    display.print("R:");
-    display.print((int)resistance);
-    display.println(" ohm");
+    display.setCursor(0, 16);
+    if (resistance >= SENSOR_MAX_SAFE_RESISTANCE) {
+        display.println("TEMP ERR CHECK WIRING");
+    } else {
+        display.print("T:");
+        display.print((int)temperature);
+        display.write(247); 
+        display.println("C");
+        display.setCursor(0, 28);
+        display.print("R:");
+        display.print((int)resistance);
+        display.println(" Ohm");
+    }
 
     // ----- FLAP Status -----
-    display.setTextSize(1);
     display.setCursor(0, 52);
-    if (resistance < TEMP_RESISTANCE_THRESHOLD) {
+    if (temperature >= TEMPERATURE_THRESHOLD) {
         display.println("FLAP: OPEN (HOT)");
     } else {
         display.println("FLAP: CLOSED");
@@ -133,12 +170,13 @@ void updateDisplay(float resistance) {
 void loop() {
     // ----- TEMPERATURE Calculation -----
     float resistance = readTemperatureResistance();
+    float temperature = resistanceToTemperature(resistance);
 
     // ----- FLAP Update -----
-    updateServo(resistance);
+    updateServo(temperature);
 
     // ----- DISPLAY Update -----
-    updateDisplay(resistance);
+    updateDisplay(temperature, resistance);
 
     delay(500);
 }
