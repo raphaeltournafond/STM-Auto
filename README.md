@@ -38,3 +38,9 @@ Monitor serial output at 115200 baud.
 - Adafruit SSD1306
 - Adafruit GFX Library
 - Arduino framework for STM32
+
+## Schematics
+
+The kicad project [is available here](kicad/stm-auto/)
+
+![Schematics image](kicad/stm-auto/stm-auto.svg)
