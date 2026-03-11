@@ -4,8 +4,9 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-
 // ========== CONFIGURATION ==========
+
+// /!\ Order of interpolation tables should be in INCREASING order 
 
 // ----- BUILT IN LED -----
 const uint8_t PIN_STATUSLED = LED_BUILTIN;
@@ -21,16 +22,29 @@ const uint8_t PIN_STATUSLED = LED_BUILTIN;
 TwoWire OLED_I2C(OLED_SDA_PIN, OLED_SCL_PIN); 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &OLED_I2C, OLED_RESET);
 
+// ----- HARDWARE Constants -----
+const float VREF = 3.3f;
+const uint16_t ADC_MAX = 4095;
+
 // ----- TEMPERATURE Sensor -----
 const uint8_t TEMP_SENSOR_PIN  = PA1;
 const float TEMP_SERIES_RESISTOR = 220.0f;
-// Calibration
-const float tempTable[] =  {40, 60, 80, 100, 120, 140, 150};
-const float resTable[]  =  {925,438,224,120, 68,  41,  32};
-const uint8_t tableSize = sizeof(tempTable) / sizeof(tempTable[0]);
 // Threshold
-const float SENSOR_MAX_SAFE_RESISTANCE = 1500.0f; // If the sensor reads above this resistance, it is likely disconnected/failed/oil temp is very low.
+const float TEMP_MAX_SAFE_RESISTANCE = 1500.0f; // If the sensor reads above this resistance, it is likely disconnected/failed/oil temp is very low.
 const float TEMPERATURE_THRESHOLD = 90.0f; // Adjust according to actual measurement
+// Sensor scale
+const float resTable[]      =  {32.0,  41.0,  68.0,  120.0, 224.0, 438.0, 925.0}; // increasing mandatory here
+const float tempTable[]     =  {150.0, 140.0, 120.0, 100.0, 80.0,  60.0,  40.0};
+const uint8_t tempTableSize = sizeof(tempTable) / sizeof(tempTable[0]);
+
+// ----- PRESSURE Sensor -----
+const uint8_t PRESS_SENSOR_PIN = PA0;
+const float PRESS_DIVIDER_RATIO = 1.5f; // 10/20 kOhm voltage divider
+const float PRESS_MIN_SAFE_VOLTAGE = 0.3f; // under this value we can consider disconnected
+// Sensor scale
+const float vPressureTable[] = {0.5, 0.87, 1.25, 1.77, 2.22, 2.55, 2.79, 2.91, 3.01}; // increasing mandatory here
+const float barTable[]       = {0.0, 1.0,  2.0,  3.5,  5.0,  6.5,  8.0,  9.0,  10.0};
+const uint8_t pressTableSize = sizeof(vPressureTable) / sizeof(vPressureTable[0]);
 
 // ----- FLAP Servos -----
 const uint8_t RED_SERVO_PIN = PA6;
@@ -38,19 +52,13 @@ const uint8_t RED_SERVO_CLOSED = 0;
 const uint8_t RED_SERVO_OPEN   = 90;
 Servo redServo;
 
-// ----- HARDWARE Constants -----
-const float VREF = 3.3f;
-const uint16_t ADC_MAX = 4095;
-
 
 // ========== SETUP ==========
 
 void blinkErrorLED() {
     while (true) {
-        digitalWrite(PIN_STATUSLED, HIGH);
-        delay(250);
-        digitalWrite(PIN_STATUSLED, LOW);
-        delay(250);
+        digitalWrite(PIN_STATUSLED, HIGH); delay(250);
+        digitalWrite(PIN_STATUSLED, LOW);  delay(250);
     }
 }
 
@@ -65,9 +73,7 @@ void setup() {
 
     // ----- OLED Screen initialization -----
     OLED_I2C.begin(); // I2C at 400kHz by default (smoother display)
-    if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
-        blinkErrorLED();
-    }
+    if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) blinkErrorLED();
 
     display.clearDisplay();
     display.display();
@@ -81,102 +87,114 @@ void setup() {
 }
 
 
-// ========== HELPER Functions ==========
+// ========== MATH and HARDWARE HELPERS ==========
+
+float readPinVoltage(uint8_t pin) {
+    return analogRead(pin) * (VREF / ADC_MAX);
+}
+
+float interpolate(float x, const float* xTable, const float* yTable, uint8_t size) {
+    if (x <= xTable[0]) return yTable[0];
+    if (x >= xTable[size - 1]) return yTable[size - 1];
+
+    for (uint8_t i = 0; i < size - 1; i++) {
+        if (x >= xTable[i] && x <= xTable[i + 1]) {
+            return yTable[i] + (x - xTable[i]) * (yTable[i + 1] - yTable[i]) / (xTable[i + 1] - xTable[i]);
+        }
+    }
+    return yTable[size - 1]; // fallback
+}
+
+// ========== SENSOR Specific ==========
+
+// ----- TEMPERATURE -----
 
 float readTemperatureResistance() {
-    uint16_t adcValue = analogRead(TEMP_SENSOR_PIN);
-
-    float voltage = adcValue * (VREF / ADC_MAX);
-
-    // Prevent divide-by-zero if disconnected
-    if (voltage >= (VREF - 0.01f)) {
-        voltage = VREF - 0.01f;
-    }
-
-    float resistance = (voltage * TEMP_SERIES_RESISTOR) / (VREF - voltage);
-
-    return resistance;
+    float voltage = readPinVoltage(TEMP_SENSOR_PIN);
+    if (voltage >= (VREF - 0.01f)) voltage = VREF - 0.01f; // prevent div by zero
+    return (voltage * TEMP_SERIES_RESISTOR) / (VREF - voltage);
 }
 
 float resistanceToTemperature(float resistance) {
-    if (resistance >= SENSOR_MAX_SAFE_RESISTANCE) {
-        return tempTable[tableSize - 1]; // likely disconnected or very low temp, return highest temp to open flap for safety
+    if (resistance >= TEMP_MAX_SAFE_RESISTANCE) {
+        return tempTable[0]; // fallback to highest temp for safety
     }
-
-    // Clamp outside range
-    if (resistance >= resTable[0]) return tempTable[0];
-    if (resistance <= resTable[tableSize - 1]) return tempTable[tableSize - 1];
-
-    for (uint8_t i = 0; i < tableSize - 1; i++) {
-        if (resistance <= resTable[i] && resistance >= resTable[i + 1]) {
-
-            float r1 = resTable[i];
-            float r2 = resTable[i + 1];
-            float t1 = tempTable[i];
-            float t2 = tempTable[i + 1];
-
-            // Linear interpolation
-            float ratio = (resistance - r1) / (r2 - r1);
-            return t1 + ratio * (t2 - t1);
-        }
-    }
-
-    return tempTable[tableSize - 1]; // fallback to highest temp for safety
+    return interpolate(resistance, resTable, tempTable, tempTableSize);
 }
+
+// ----- PRESSURE -----
+
+float readPressureVoltage() {
+    return readPinVoltage(PRESS_SENSOR_PIN) * PRESS_DIVIDER_RATIO;
+}
+
+// ========== SENSOR FEEDBACK ==========
+
+// ----- SERVOS -----
 
 void updateServo(float temperature) {
-    if (temperature >= TEMPERATURE_THRESHOLD) {
-        redServo.write(RED_SERVO_OPEN);
-    } else {
-        redServo.write(RED_SERVO_CLOSED);
-    }
+    redServo.write((temperature >= TEMPERATURE_THRESHOLD) ? RED_SERVO_OPEN : RED_SERVO_CLOSED);
 }
 
-void updateDisplay(float temperature, float resistance) {
+// ----- DISPLAY -----
+
+void updateDisplay(float temperature, float resistance, float pressure, float vPressure) {
     display.clearDisplay();
     display.setTextColor(SSD1306_WHITE);
 
-    // ----- TITLE -----
     display.setTextSize(1);
     display.setCursor(0, 0);
     display.println("SWEE.BRZ OIL MONITOR");
 
-    // ----- TEMPERATURE -----
+    // --- TEMPERATURE ---
     display.setCursor(0, 16);
-    if (resistance >= SENSOR_MAX_SAFE_RESISTANCE) {
-        display.println("TEMP ERR CHECK WIRING");
+    if (resistance >= TEMP_MAX_SAFE_RESISTANCE) {
+        display.println("TEMPERATURE ERROR!");
+        display.setCursor(0, 26);
+        display.println("-> check wiring");
     } else {
-        display.print("T:");
-        display.print((int)temperature);
-        display.write(247); 
-        display.println("C");
-        display.setCursor(0, 28);
-        display.print("R:");
-        display.print((int)resistance);
-        display.println(" Ohm");
+        display.print("T:"); display.print((int)temperature); display.write(247); display.println("C");
+        display.setCursor(0, 26);
+        display.print("R:"); display.print((int)resistance); display.println(" Ohm");
     }
 
-    // ----- FLAP Status -----
-    display.setCursor(0, 52);
-    if (temperature >= TEMPERATURE_THRESHOLD) {
-        display.println("FLAP: OPEN (HOT)");
+    // --- PRESSURE ---
+    display.setCursor(0, 36);
+    if (vPressure < PRESS_MIN_SAFE_VOLTAGE) {
+        display.println("PRESSURE ERROR!");
+        display.setCursor(0, 46);
+        display.println("-> check wiring");
     } else {
-        display.println("FLAP: CLOSED");
+        display.print("PRES:"); display.print(pressure, 1); display.println(" BAR");
+        display.setCursor(0, 46);
+        display.print("V:"); display.print(vPressure, 2); display.println("v");
     }
+
+    // --- FLAP Status ---
+    display.setCursor(0, 56);
+    display.print("FLAP: ");
+    display.println((temperature >= TEMPERATURE_THRESHOLD) ? "OPEN" : "CLOSED");
 
     display.display();
 }
 
+
+// ========== MAIN LOOP ==========
+
 void loop() {
-    // ----- TEMPERATURE Calculation -----
+    // ----- TEMPERATURE Computation -----
     float resistance = readTemperatureResistance();
     float temperature = resistanceToTemperature(resistance);
+
+    // ----- PRESSURE Computation -----
+    float vPressure = readPressureVoltage();
+    float pressure = interpolate(vPressure, vPressureTable, barTable, pressTableSize);
 
     // ----- FLAP Update -----
     updateServo(temperature);
 
     // ----- DISPLAY Update -----
-    updateDisplay(temperature, resistance);
+    updateDisplay(temperature, resistance, pressure, vPressure);
 
-    delay(500);
+    delay(200);
 }
