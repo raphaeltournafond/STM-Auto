@@ -22,6 +22,13 @@ const uint8_t PIN_STATUSLED = LED_BUILTIN;
 TwoWire OLED_I2C(OLED_SDA_PIN, OLED_SCL_PIN); 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &OLED_I2C, OLED_RESET);
 
+const float TEMP_ALERTE    = 130.0;
+const int   FLASH_INTERVAL = 400;   // ms entre chaque inversion
+
+bool  alerteActive   = false;
+bool  invertedMode   = false;
+unsigned long lastFlash = 0;
+
 // ----- HARDWARE Constants -----
 const float VREF = 3.3f;
 const uint16_t ADC_MAX = 4095;
@@ -65,6 +72,15 @@ void blinkErrorLED() {
 void setup() {
     Serial.begin(115200);
 
+    //Doublon dans loop (peut etre supprimer celui la jsp) 
+    // ----- TEMPERATURE Computation -----
+    float resistance = readTemperatureResistance();
+    float temperature = resistanceToTemperature(resistance);
+
+    // ----- PRESSURE Computation -----
+    float vPressure = readPressureVoltage();
+    float pressure = interpolate(vPressure, vPressureTable, barTable, pressTableSize);
+
     delay(500); // important to let the screen initialize
     
     // ----- Built in initialization -----
@@ -74,15 +90,24 @@ void setup() {
     // ----- OLED Screen initialization -----
     OLED_I2C.begin(); // I2C at 400kHz by default (smoother display)
     if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) blinkErrorLED();
+    alerteActive = (temperature > TEMP_ALERTE);
 
     display.clearDisplay();
+
+    // Zone scroll (pages 0-1 = 16 premiers pixels)
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0, 4);
+    display.print(F("SWEE.BRZ OIL MONITOR"));
     display.display();
+    display.startscrollright(0x00, 0x01);
+
+    drawStaticZone(temperature, pressure);
 
     // ----- SERVO initialization -----
     redServo.attach(RED_SERVO_PIN);
     redServo.write(RED_SERVO_CLOSED);
-    
-    // ----- OTHER Settings -----
+
     analogReadResolution(12);
 }
 
@@ -142,10 +167,6 @@ void updateDisplay(float temperature, float resistance, float pressure, float vP
     display.clearDisplay();
     display.setTextColor(SSD1306_WHITE);
 
-    display.setTextSize(1);
-    display.setCursor(0, 0);
-    display.println("SWEE.BRZ OIL MONITOR");
-
     // --- TEMPERATURE ---
     display.setCursor(0, 16);
     if (resistance >= TEMP_MAX_SAFE_RESISTANCE) {
@@ -194,7 +215,58 @@ void loop() {
     updateServo(temperature);
 
     // ----- DISPLAY Update -----
-    updateDisplay(temperature, resistance, pressure, vPressure);
+    drawStaticZone(temperature, pressure);
 
     delay(200);
+
+    alerteActive = (temperature > TEMP_ALERTE);
+
+    if (alerteActive) {
+        unsigned long now = millis();
+        if (now - lastFlash >= FLASH_INTERVAL) {
+        lastFlash    = now;
+        invertedMode = !invertedMode;
+        // Inversion matérielle : ne touche pas au framebuffer ni au scroll
+        display.invertDisplay(invertedMode);
+        }
+    } else {
+        if (invertedMode) {
+        invertedMode = false;
+        display.invertDisplay(false); // retour à l'affichage normal
+        }
+    }
+}
+
+// ─────────────────────────────────────────────
+void drawStaticZone(float temperature, float pressure) {
+  // Efface uniquement la zone basse
+  display.fillRect(0, 16, SCREEN_WIDTH, SCREEN_HEIGHT - 16, SSD1306_BLACK);
+
+  // Séparateur
+  display.drawLine(0, 17, SCREEN_WIDTH - 1, 17, SSD1306_WHITE);
+
+  // --- Température ---
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 22);
+  display.print(F("Temp huile"));
+
+  if (alerteActive) {
+    display.setCursor(74, 22);
+    display.print(F("! ALERTE !"));
+  }
+
+  display.setTextSize(2);
+  display.setCursor(0, 33);
+  display.print(temperature, 1);
+  display.print(F(" C"));
+
+  // --- Pression ---
+  display.setTextSize(1);
+  display.setCursor(0, 52);
+  display.print(F("Pression : "));
+  display.print(pressure, 1);
+  display.print(F(" bar"));
+
+  display.display();
 }
