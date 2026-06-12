@@ -7,3 +7,4 @@ kicad/stm-auto/fp-info-cache
 kicad/stm-auto/stm-auto-backups/
 kicad/stm-auto/~*.lck
 .DS_Store
+.claude/settings.local.json
