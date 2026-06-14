@@ -3,23 +3,19 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include "pins.h"   // pin map (single source of truth)
 
 // ========== CONFIGURATION ==========
 
-// /!\ Order of interpolation tables should be in INCREASING order 
-
-// ----- BUILT IN LED -----
-const uint8_t PIN_STATUSLED = LED_BUILTIN;
+// /!\ Order of interpolation tables should be in INCREASING order
 
 // ----- OLED Screen -----
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_RESET    -1 // Default to -1 to share the board reset pin
 #define SCREEN_ADDRESS 0x3C // Default to 0x3C for standard I2C adress
-#define OLED_SDA_PIN PB11
-#define OLED_SCL_PIN PB10
 
-TwoWire OLED_I2C(OLED_SDA_PIN, OLED_SCL_PIN); 
+TwoWire OLED_I2C(PIN_OLED_SDA, PIN_OLED_SCL);
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &OLED_I2C, OLED_RESET);
 
 // ----- HARDWARE Constants -----
@@ -27,18 +23,18 @@ const float VREF = 3.3f;
 const uint16_t ADC_MAX = 4095;
 
 // ----- TEMPERATURE Sensor -----
-const uint8_t TEMP_SENSOR_PIN  = PA1;
 const float TEMP_SERIES_RESISTOR = 220.0f;
 // Threshold
 const float TEMP_MAX_SAFE_RESISTANCE = 1500.0f; // If the sensor reads above this resistance, it is likely disconnected/failed/oil temp is very low.
-const float TEMPERATURE_THRESHOLD = 90.0f; // Adjust according to actual measurement
+// Flap hysteresis (DECISION_MATRIX §5): open at/above OPEN, close at/below CLOSE
+const float FLAP_OPEN_TEMP  = 92.0f;
+const float FLAP_CLOSE_TEMP = 85.0f;
 // Sensor scale
 const float resTable[]      =  {32.0,  41.0,  68.0,  120.0, 224.0, 438.0, 925.0}; // increasing mandatory here
 const float tempTable[]     =  {150.0, 140.0, 120.0, 100.0, 80.0,  60.0,  40.0};
 const uint8_t tempTableSize = sizeof(tempTable) / sizeof(tempTable[0]);
 
 // ----- PRESSURE Sensor -----
-const uint8_t PRESS_SENSOR_PIN = PA0;
 const float PRESS_DIVIDER_RATIO = 1.5f; // 10/20 kOhm voltage divider
 const float PRESS_MIN_SAFE_VOLTAGE = 0.3f; // under this value we can consider disconnected
 // Sensor scale
@@ -46,19 +42,20 @@ const float vPressureTable[] = {0.5, 0.87, 1.25, 1.77, 2.22, 2.55, 2.79, 2.91, 3
 const float barTable[]       = {0.0, 1.0,  2.0,  3.5,  5.0,  6.5,  8.0,  9.0,  10.0};
 const uint8_t pressTableSize = sizeof(vPressureTable) / sizeof(vPressureTable[0]);
 
-// ----- FLAP Servos -----
-const uint8_t RED_SERVO_PIN = PA6;
-const uint8_t RED_SERVO_CLOSED = 0;
-const uint8_t RED_SERVO_OPEN   = 90;
-Servo redServo;
+// ----- FLAP Servos (twin, driven in tandem) -----
+const uint8_t FLAP_CLOSED = 0;
+const uint8_t FLAP_OPEN   = 90;
+Servo flapServo1;
+Servo flapServo2;
+bool flapOpen = false; // current flap state (hysteresis), starts closed
 
 
 // ========== SETUP ==========
 
 void blinkErrorLED() {
     while (true) {
-        digitalWrite(PIN_STATUSLED, HIGH); delay(250);
-        digitalWrite(PIN_STATUSLED, LOW);  delay(250);
+        digitalWrite(PIN_STATUS_LED, HIGH); delay(250);
+        digitalWrite(PIN_STATUS_LED, LOW);  delay(250);
     }
 }
 
@@ -68,8 +65,8 @@ void setup() {
     delay(500); // important to let the screen initialize
     
     // ----- Built in initialization -----
-    pinMode(PIN_STATUSLED, OUTPUT);
-    digitalWrite(PIN_STATUSLED, HIGH); // High is off for the built-in LED
+    pinMode(PIN_STATUS_LED, OUTPUT);
+    digitalWrite(PIN_STATUS_LED, HIGH); // High is off for the built-in LED
 
     // ----- OLED Screen initialization -----
     OLED_I2C.begin(); // I2C at 400kHz by default (smoother display)
@@ -79,8 +76,10 @@ void setup() {
     display.display();
 
     // ----- SERVO initialization -----
-    redServo.attach(RED_SERVO_PIN);
-    redServo.write(RED_SERVO_CLOSED);
+    flapServo1.attach(PIN_SERVO_FLAP_1);
+    flapServo2.attach(PIN_SERVO_FLAP_2);
+    flapServo1.write(FLAP_CLOSED);
+    flapServo2.write(FLAP_CLOSED);
     
     // ----- OTHER Settings -----
     analogReadResolution(12);
@@ -110,7 +109,7 @@ float interpolate(float x, const float* xTable, const float* yTable, uint8_t siz
 // ----- TEMPERATURE -----
 
 float readTemperatureResistance() {
-    float voltage = readPinVoltage(TEMP_SENSOR_PIN);
+    float voltage = readPinVoltage(PIN_TEMP_SENSE);
     if (voltage >= (VREF - 0.01f)) voltage = VREF - 0.01f; // prevent div by zero
     return (voltage * TEMP_SERIES_RESISTOR) / (VREF - voltage);
 }
@@ -125,7 +124,7 @@ float resistanceToTemperature(float resistance) {
 // ----- PRESSURE -----
 
 float readPressureVoltage() {
-    return readPinVoltage(PRESS_SENSOR_PIN) * PRESS_DIVIDER_RATIO;
+    return readPinVoltage(PIN_PRESS_SENSE) * PRESS_DIVIDER_RATIO;
 }
 
 // ========== SENSOR FEEDBACK ==========
@@ -133,7 +132,12 @@ float readPressureVoltage() {
 // ----- SERVOS -----
 
 void updateServo(float temperature) {
-    redServo.write((temperature >= TEMPERATURE_THRESHOLD) ? RED_SERVO_OPEN : RED_SERVO_CLOSED);
+    if (!flapOpen && temperature >= FLAP_OPEN_TEMP)       flapOpen = true;
+    else if (flapOpen && temperature <= FLAP_CLOSE_TEMP)  flapOpen = false;
+
+    uint8_t angle = flapOpen ? FLAP_OPEN : FLAP_CLOSED;
+    flapServo1.write(angle);
+    flapServo2.write(angle);
 }
 
 // ----- DISPLAY -----
@@ -173,7 +177,7 @@ void updateDisplay(float temperature, float resistance, float pressure, float vP
     // --- FLAP Status ---
     display.setCursor(0, 56);
     display.print("FLAP: ");
-    display.println((temperature >= TEMPERATURE_THRESHOLD) ? "OPEN" : "CLOSED");
+    display.println(flapOpen ? "OPEN" : "CLOSED");
 
     display.display();
 }
