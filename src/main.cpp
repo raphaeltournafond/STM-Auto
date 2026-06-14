@@ -49,6 +49,39 @@ Servo flapServo1;
 Servo flapServo2;
 bool flapOpen = false; // current flap state (hysteresis), starts closed
 
+// ----- DECISION MATRIX (DECISION_MATRIX §3) -----
+// Situations evaluated by priority (top = highest); first true wins.
+enum Situation {
+    SIT_TEMP_SENSOR_ERR,  // 1  R > TEMP_MAX_SAFE_RESISTANCE
+    SIT_PRESS_SENSOR_ERR, // 2  V < PRESS_MIN_SAFE_VOLTAGE
+    SIT_STOP_ENGINE,      // 3  too hot AND too low pressure
+    SIT_LOW_PRESSURE,     // 4  pressure below adaptive floor (§4)
+    SIT_OVERPRESSURE,     // 5  pressure above ceiling
+    SIT_MILD_OVERHEAT,    // 6  hot but pressure OK
+    SIT_REGULATION,       // 7  warm, flap regulating
+    SIT_NORMAL,           // 8  normal operating band
+    SIT_COLD,             // 9  engine cold
+};
+
+// Alert level mapped to the indicator channel (LED colour).
+enum AlertLevel { ALERT_OFF, ALERT_WARN, ALERT_ALARM }; // off / yellow / red
+
+// Temperature band thresholds (°C)
+const float TEMP_STOP_ENGINE = 122.0f; // combined with low pressure -> stop engine
+const float TEMP_OVERHEAT    = 110.0f; // mild overheat band start
+const float TEMP_REGULATION  = 90.0f;  // thermal-regulation band start
+const float TEMP_NORMAL      = 70.0f;  // normal band start
+// Pressure thresholds (bar)
+const float PRESS_STOP_ENGINE = 1.2f;  // stop-engine pressure (with TEMP_STOP_ENGINE)
+const float PRESS_OVER        = 6.5f;  // overpressure ceiling
+
+// Adaptive low-pressure floor (§4), indexed by temperature band:
+// 0:<70  1:70-89  2:90-110  3:110-122  4:>122
+const float pressCritical[] = {1.5f, 0.9f, 0.8f, 0.6f, 1.2f}; // alarm below
+const float pressRearm[]    = {1.8f, 1.1f, 1.0f, 0.8f, 1.2f}; // clear at/above
+bool lowPressAlarm = false; // adaptive low-pressure alarm state (§4 hysteresis)
+int prevSituation = -1;     // last dispatched situation (for edge-triggered sound/voice)
+
 
 // ========== SETUP ==========
 
@@ -127,22 +160,106 @@ float readPressureVoltage() {
     return readPinVoltage(PIN_PRESS_SENSE) * PRESS_DIVIDER_RATIO;
 }
 
-// ========== SENSOR FEEDBACK ==========
+// ========== DECISION MATRIX ==========
 
-// ----- SERVOS -----
+uint8_t temperatureBand(float t) {
+    if (t < TEMP_NORMAL)       return 0; // < 70
+    if (t < TEMP_REGULATION)   return 1; // 70-89
+    if (t < TEMP_OVERHEAT)     return 2; // 90-110
+    if (t <= TEMP_STOP_ENGINE) return 3; // 110-122
+    return 4;                            // > 122
+}
 
-void updateServo(float temperature) {
-    if (!flapOpen && temperature >= FLAP_OPEN_TEMP)       flapOpen = true;
-    else if (flapOpen && temperature <= FLAP_CLOSE_TEMP)  flapOpen = false;
+// Adaptive low-pressure alarm with per-band hysteresis (§4).
+void updateLowPressAlarm(float temperature, float pressure) {
+    uint8_t b = temperatureBand(temperature);
+    if (!lowPressAlarm && pressure < pressCritical[b])      lowPressAlarm = true;
+    else if (lowPressAlarm && pressure >= pressRearm[b])    lowPressAlarm = false;
+}
 
+// Priority-ordered evaluation: first true wins (§3).
+Situation evaluateSituation(float resistance, float vPressure, float temperature, float pressure) {
+    if (resistance >= TEMP_MAX_SAFE_RESISTANCE)                          return SIT_TEMP_SENSOR_ERR;
+    if (vPressure < PRESS_MIN_SAFE_VOLTAGE)                              return SIT_PRESS_SENSOR_ERR;
+    if (temperature > TEMP_STOP_ENGINE && pressure < PRESS_STOP_ENGINE) return SIT_STOP_ENGINE;
+    if (lowPressAlarm)                                                  return SIT_LOW_PRESSURE;
+    if (pressure > PRESS_OVER)                                          return SIT_OVERPRESSURE;
+    if (temperature >= TEMP_OVERHEAT)                                   return SIT_MILD_OVERHEAT;
+    if (temperature >= TEMP_REGULATION)                                 return SIT_REGULATION;
+    if (temperature >= TEMP_NORMAL)                                     return SIT_NORMAL;
+    return SIT_COLD;
+}
+
+AlertLevel situationAlert(Situation sit) {
+    switch (sit) {
+        case SIT_TEMP_SENSOR_ERR:
+        case SIT_PRESS_SENSOR_ERR:
+        case SIT_STOP_ENGINE:
+        case SIT_LOW_PRESSURE:
+        case SIT_OVERPRESSURE:   return ALERT_ALARM;
+        case SIT_MILD_OVERHEAT:  return ALERT_WARN;
+        default:                 return ALERT_OFF;
+    }
+}
+
+const char* situationName(Situation sit) {
+    switch (sit) {
+        case SIT_TEMP_SENSOR_ERR:  return "TEMP SENS ERR";
+        case SIT_PRESS_SENSOR_ERR: return "PRESS SENS ERR";
+        case SIT_STOP_ENGINE:      return "STOP ENGINE";
+        case SIT_LOW_PRESSURE:     return "LOW PRESSURE";
+        case SIT_OVERPRESSURE:     return "OVERPRESSURE";
+        case SIT_MILD_OVERHEAT:    return "MILD OVERHEAT";
+        case SIT_REGULATION:       return "REGULATION";
+        case SIT_NORMAL:           return "NORMAL";
+        default:                   return "COLD";
+    }
+}
+
+// ========== SITUATION OUTPUTS ==========
+
+// ----- FLAP (servos) -----
+// Safety situations force the flap open; overpressure leaves it unchanged
+// (opening does not relieve pressure); normal bands use temperature hysteresis (§5).
+void applyFlap(Situation sit, float temperature) {
+    switch (sit) {
+        case SIT_TEMP_SENSOR_ERR:
+        case SIT_PRESS_SENSOR_ERR:
+        case SIT_STOP_ENGINE:
+        case SIT_LOW_PRESSURE:
+        case SIT_MILD_OVERHEAT:
+            flapOpen = true; // force open (favour cooling)
+            break;
+        case SIT_OVERPRESSURE:
+            break;           // unchanged
+        default:             // REGULATION / NORMAL / COLD
+            if (!flapOpen && temperature >= FLAP_OPEN_TEMP)      flapOpen = true;
+            else if (flapOpen && temperature <= FLAP_CLOSE_TEMP) flapOpen = false;
+            break;
+    }
     uint8_t angle = flapOpen ? FLAP_OPEN : FLAP_CLOSED;
     flapServo1.write(angle);
     flapServo2.write(angle);
 }
 
+// ----- LED -----
+// Onboard PC13 (active LOW) used as the backup indicator: lit on any alert.
+// TODO: drive WS2812B (PIN_WS2812_DATA) as the primary off/yellow/red indicator.
+void applyAlertLed(AlertLevel level) {
+    digitalWrite(PIN_STATUS_LED, level == ALERT_OFF ? HIGH : LOW);
+}
+
+// ----- SOUND / VOICE (edge-triggered) -----
+// Buzzer (PIN_BUZZER) and MP3 voice (USART1) are wired but not yet driven.
+// TODO: implement buzzer patterns (§3) and voice files (§7); for now log only.
+void onSituationChange(Situation sit) {
+    Serial.print("Situation -> ");
+    Serial.println(situationName(sit));
+}
+
 // ----- DISPLAY -----
 
-void updateDisplay(float temperature, float resistance, float pressure, float vPressure) {
+void updateDisplay(Situation sit, float temperature, float resistance, float pressure, float vPressure) {
     display.clearDisplay();
     display.setTextColor(SSD1306_WHITE);
 
@@ -174,10 +291,26 @@ void updateDisplay(float temperature, float resistance, float pressure, float vP
         display.print("V:"); display.print(vPressure, 2); display.println("v");
     }
 
-    // --- FLAP Status ---
+    // --- STATUS banner (active situation; sensor errors already shown above) ---
     display.setCursor(0, 56);
-    display.print("FLAP: ");
-    display.println(flapOpen ? "OPEN" : "CLOSED");
+    switch (sit) {
+        case SIT_STOP_ENGINE:
+            display.println("STOP ENGINE!");
+            break;
+        case SIT_LOW_PRESSURE:
+            display.print("LOW PRESS! "); display.print(pressure, 1); display.println("b");
+            break;
+        case SIT_OVERPRESSURE:
+            display.print("OVER PRESS "); display.print(pressure, 1); display.println("b");
+            break;
+        case SIT_MILD_OVERHEAT:
+            display.println("TEMP HIGH!");
+            break;
+        default: // sensor errors + REGULATION / NORMAL / COLD
+            display.print("FLAP: ");
+            display.println(flapOpen ? "OPEN" : "CLOSED");
+            break;
+    }
 
     display.display();
 }
@@ -194,11 +327,17 @@ void loop() {
     float vPressure = readPressureVoltage();
     float pressure = interpolate(vPressure, vPressureTable, barTable, pressTableSize);
 
-    // ----- FLAP Update -----
-    updateServo(temperature);
+    // ----- DECISION (§3) -----
+    bool sensorsOk = (resistance < TEMP_MAX_SAFE_RESISTANCE) && (vPressure >= PRESS_MIN_SAFE_VOLTAGE);
+    if (sensorsOk) updateLowPressAlarm(temperature, pressure);
+    else           lowPressAlarm = false; // readings unreliable -> drop the adaptive alarm
+    Situation sit = evaluateSituation(resistance, vPressure, temperature, pressure);
 
-    // ----- DISPLAY Update -----
-    updateDisplay(temperature, resistance, pressure, vPressure);
+    // ----- OUTPUTS -----
+    applyFlap(sit, temperature);
+    applyAlertLed(situationAlert(sit));
+    if ((int)sit != prevSituation) { onSituationChange(sit); prevSituation = sit; }
+    updateDisplay(sit, temperature, resistance, pressure, vPressure);
 
     delay(200);
 }
