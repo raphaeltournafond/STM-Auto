@@ -40,10 +40,11 @@ const float vPressureTable[] = {0.5, 0.87, 1.25, 1.77, 2.22, 2.55, 2.79, 2.91, 3
 const float barTable[]       = {0.0, 1.0,  2.0,  3.5,  5.0,  6.5,  8.0,  9.0,  10.0};
 const uint8_t pressTableSize = sizeof(vPressureTable) / sizeof(vPressureTable[0]);
 
-// ----- FLAP Servos -----
-const uint8_t RED_SERVO_CLOSED = 0;
-const uint8_t RED_SERVO_OPEN   = 90;
-Servo redServo;
+// ----- FLAP Servos (twin, driven in tandem) -----
+const uint8_t FLAP_CLOSED = 0;
+const uint8_t FLAP_OPEN   = 90;
+Servo flapServo1;
+Servo flapServo2;
 
 
 // ========== SETUP ==========
@@ -72,8 +73,10 @@ void setup() {
     display.display();
 
     // ----- SERVO initialization -----
-    redServo.attach(PIN_SERVO_FLAP_1);
-    redServo.write(RED_SERVO_CLOSED);
+    flapServo1.attach(PIN_SERVO_FLAP_1);
+    flapServo2.attach(PIN_SERVO_FLAP_2);
+    flapServo1.write(FLAP_CLOSED);
+    flapServo2.write(FLAP_CLOSED);
     
     // ----- OTHER Settings -----
     analogReadResolution(12);
@@ -126,7 +129,9 @@ float readPressureVoltage() {
 // ----- SERVOS -----
 
 void updateServo(float temperature) {
-    redServo.write((temperature >= TEMPERATURE_THRESHOLD) ? RED_SERVO_OPEN : RED_SERVO_CLOSED);
+    uint8_t angle = (temperature >= TEMPERATURE_THRESHOLD) ? FLAP_OPEN : FLAP_CLOSED;
+    flapServo1.write(angle);
+    flapServo2.write(angle);
 }
 
 // ----- DISPLAY -----

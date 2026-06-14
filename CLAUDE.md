@@ -53,7 +53,7 @@ Notes: `Servo` lib owns **TIM2**, `tone()` owns **TIM3** (shared timers — don'
 CAN uses the USB pins → remove the PA12 USB pull-up. WS2812B needs a level shifter (or ~4.3V supply).
 
 `main.cpp` includes `pins.h` and uses these macros directly — change a pin in `pins.h` only.
-Wired but not yet coded: second flap servo (`PIN_SERVO_FLAP_2`), MP3, buzzer, button, WS2812B, CAN.
+Wired but not yet coded: MP3, buzzer, button, WS2812B, CAN.
 
 ## Layout & workflow
 
