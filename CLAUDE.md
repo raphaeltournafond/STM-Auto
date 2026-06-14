@@ -18,27 +18,35 @@ opens/closes **twin flap servos** (in tandem) on a temperature threshold, and sh
 pio run -e bluepill_f103c8            # build
 pio run -e bluepill_f103c8 -t upload  # flash via ST-Link (upload_protocol = stlink)
 pio device monitor -b 115200          # serial monitor
+pio test -e native                    # run host unit tests (no hardware)
 pio run -t clean                      # clean
 ```
 
-No unit tests (`test/` is a PlatformIO placeholder). Libs (`platformio.ini`): Adafruit SSD1306 + GFX.
+Libs (`platformio.ini`): Adafruit SSD1306 + GFX (firmware); Unity (native tests, auto-installed).
 
 ## Architecture
 
-All logic is in `src/main.cpp`:
+Decision logic lives in `lib/decision/` (pure, Arduino-free, unit-tested); `src/main.cpp` owns
+hardware I/O and state and calls into it:
 
+- **`lib/decision/decision.{h,cpp}`** — `evaluateSituation()` (priority matrix §3), `nextFlapState()`
+  (§5 hysteresis), `nextLowPressAlarm()` (§4), `temperatureBand()`, `situationAlert()`,
+  `interpolate()` and the sensor scale tables. All pure functions taking state as parameters.
 - `setup()` — serial @115200, status LED, OLED init (blocks in `blinkErrorLED()` on failure),
   servo attach + close, 12-bit ADC.
-- `loop()` @200 ms — temp resistance → °C, pressure voltage → bar, then the **situation matrix**:
-  `evaluateSituation()` picks the highest-priority active situation (`DECISION_MATRIX.md` §3),
-  dispatched to `applyFlap()` (servos + hysteresis §5), `applyAlertLed()` (onboard backup LED),
-  `onSituationChange()` (edge-triggered sound/voice — stubbed), and `updateDisplay()`.
-- Shared helpers `readPinVoltage()` and `interpolate()` (piecewise-linear) serve both sensors.
-  `updateLowPressAlarm()` holds the adaptive low-pressure floor with hysteresis (§4).
+- `loop()` @200 ms — read sensors, then run the decision functions and dispatch outputs:
+  `applyFlap()` (twin servos), `applyAlertLed()` (onboard backup LED), `onSituationChange()`
+  (edge-triggered sound/voice — stubbed), and `updateDisplay()`. `main.cpp` holds the evolving
+  state (`flapOpen`, `lowPressAlarm`, `prevSituation`).
+- **Tests**: `test/test_decision/` (Unity) run via `pio test -e native` against `lib/decision` —
+  the `native` env excludes `src/` so no hardware/toolchain is needed.
 
 **Conventions to preserve:**
-- Interpolation x-tables (`resTable`, `vPressureTable`) **must stay strictly increasing**, each in
-  sync with its y-table (`tempTable`, `barTable`) — `interpolate()` assumes it.
+- `lib/decision` stays Arduino-free (pure functions, state passed in) so it builds natively — keep
+  hardware (Servo/OLED/ADC/tone) in `src/main.cpp`. Add a test when you add decision logic.
+- Interpolation x-tables (`resTable`, `vPressureTable` in `lib/decision/decision.cpp`) **must stay
+  strictly increasing**, each in sync with its y-table (`tempTable`, `barTable`) — `interpolate()`
+  assumes it.
 - Keep the sensor fail-safes: resistance ≥ `TEMP_MAX_SAFE_RESISTANCE` → `TEMPERATURE ERROR`;
   pressure volt < `PRESS_MIN_SAFE_VOLTAGE` → `PRESSURE ERROR`.
 
