@@ -26,7 +26,9 @@ const uint16_t ADC_MAX = 4095;
 const float TEMP_SERIES_RESISTOR = 220.0f;
 // Threshold
 const float TEMP_MAX_SAFE_RESISTANCE = 1500.0f; // If the sensor reads above this resistance, it is likely disconnected/failed/oil temp is very low.
-const float TEMPERATURE_THRESHOLD = 90.0f; // Adjust according to actual measurement
+// Flap hysteresis (DECISION_MATRIX §5): open at/above OPEN, close at/below CLOSE
+const float FLAP_OPEN_TEMP  = 92.0f;
+const float FLAP_CLOSE_TEMP = 85.0f;
 // Sensor scale
 const float resTable[]      =  {32.0,  41.0,  68.0,  120.0, 224.0, 438.0, 925.0}; // increasing mandatory here
 const float tempTable[]     =  {150.0, 140.0, 120.0, 100.0, 80.0,  60.0,  40.0};
@@ -45,6 +47,7 @@ const uint8_t FLAP_CLOSED = 0;
 const uint8_t FLAP_OPEN   = 90;
 Servo flapServo1;
 Servo flapServo2;
+bool flapOpen = false; // current flap state (hysteresis), starts closed
 
 
 // ========== SETUP ==========
@@ -129,7 +132,10 @@ float readPressureVoltage() {
 // ----- SERVOS -----
 
 void updateServo(float temperature) {
-    uint8_t angle = (temperature >= TEMPERATURE_THRESHOLD) ? FLAP_OPEN : FLAP_CLOSED;
+    if (!flapOpen && temperature >= FLAP_OPEN_TEMP)       flapOpen = true;
+    else if (flapOpen && temperature <= FLAP_CLOSE_TEMP)  flapOpen = false;
+
+    uint8_t angle = flapOpen ? FLAP_OPEN : FLAP_CLOSED;
     flapServo1.write(angle);
     flapServo2.write(angle);
 }
@@ -171,7 +177,7 @@ void updateDisplay(float temperature, float resistance, float pressure, float vP
     // --- FLAP Status ---
     display.setCursor(0, 56);
     display.print("FLAP: ");
-    display.println((temperature >= TEMPERATURE_THRESHOLD) ? "OPEN" : "CLOSED");
+    display.println(flapOpen ? "OPEN" : "CLOSED");
 
     display.display();
 }
