@@ -29,9 +29,12 @@ All logic is in `src/main.cpp`:
 
 - `setup()` — serial @115200, status LED, OLED init (blocks in `blinkErrorLED()` on failure),
   servo attach + close, 12-bit ADC.
-- `loop()` @200 ms — temp resistance → °C, pressure voltage → bar, `updateServo()` at
-  `TEMPERATURE_THRESHOLD`, `updateDisplay()`.
+- `loop()` @200 ms — temp resistance → °C, pressure voltage → bar, then the **situation matrix**:
+  `evaluateSituation()` picks the highest-priority active situation (`DECISION_MATRIX.md` §3),
+  dispatched to `applyFlap()` (servos + hysteresis §5), `applyAlertLed()` (onboard backup LED),
+  `onSituationChange()` (edge-triggered sound/voice — stubbed), and `updateDisplay()`.
 - Shared helpers `readPinVoltage()` and `interpolate()` (piecewise-linear) serve both sensors.
+  `updateLowPressAlarm()` holds the adaptive low-pressure floor with hysteresis (§4).
 
 **Conventions to preserve:**
 - Interpolation x-tables (`resTable`, `vPressureTable`) **must stay strictly increasing**, each in
