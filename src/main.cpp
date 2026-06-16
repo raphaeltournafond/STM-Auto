@@ -3,8 +3,10 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <SPI.h>
 #include "pins.h"      // pin map (single source of truth)
 #include "decision.h"  // hardware-independent decision logic (unit-tested)
+#include "ws2812.h"    // WS2812B pixel encoding (unit-tested)
 
 // ========== CONFIGURATION ==========
 
@@ -33,6 +35,24 @@ Servo flapServo2;
 bool flapOpen = false;      // current flap state (hysteresis), starts closed
 bool lowPressAlarm = false; // adaptive low-pressure alarm state (§4)
 int prevSituation = -1;     // last dispatched situation (edge-triggered sound/voice)
+
+// ----- WS2812B RGB LED (primary indicator) -----
+// Driven over SPI2 MOSI (PIN_WS2812_DATA); SCLK/MISO are SPI2's other pins,
+// unused/unconnected. Each WS2812 bit is 3 SPI bits at ~2.4 MHz (see lib/ws2812).
+// A blocking 9-byte transfer is IRQ-safe (no bit-banging) and ample for one pixel.
+SPIClass WS2812_SPI(PIN_WS2812_DATA, PB14, PB13); // MOSI, (MISO), (SCLK)
+
+void ws2812Send(const uint8_t* buf, uint8_t len) {
+    WS2812_SPI.beginTransaction(SPISettings(2400000, MSBFIRST, SPI_MODE0));
+    for (uint8_t i = 0; i < len; i++) WS2812_SPI.transfer(buf[i]);
+    WS2812_SPI.endTransaction();
+}
+
+void ws2812ShowAlert(AlertLevel level) {
+    uint8_t buf[WS2812_PIXEL_BYTES];
+    encodePixelGRB(alertColor(level), buf);
+    ws2812Send(buf, sizeof(buf));
+}
 
 
 // ========== SETUP ==========
@@ -66,6 +86,10 @@ void setup() {
     flapServo1.write(FLAP_CLOSED);
     flapServo2.write(FLAP_CLOSED);
 
+    // ----- WS2812B initialization -----
+    WS2812_SPI.begin();
+    ws2812ShowAlert(ALERT_OFF); // start dark
+
     // ----- OTHER Settings -----
     analogReadResolution(12);
 }
@@ -98,9 +122,10 @@ void applyFlap(bool open) {
 }
 
 // ----- LED -----
-// Onboard PC13 (active LOW) used as the backup indicator: lit on any alert.
-// TODO: drive WS2812B (PIN_WS2812_DATA) as the primary off/yellow/red indicator.
+// Primary indicator: WS2812B (off/yellow/red). Onboard PC13 (active LOW) mirrors
+// it as a backup: lit on any alert, off otherwise.
 void applyAlertLed(AlertLevel level) {
+    ws2812ShowAlert(level);
     digitalWrite(PIN_STATUS_LED, level == ALERT_OFF ? HIGH : LOW);
 }
 

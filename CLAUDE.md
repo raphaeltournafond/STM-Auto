@@ -26,24 +26,26 @@ Libs (`platformio.ini`): Adafruit SSD1306 + GFX (firmware); Unity (native tests,
 
 ## Architecture
 
-Decision logic lives in `lib/decision/` (pure, Arduino-free, unit-tested); `src/main.cpp` owns
-hardware I/O and state and calls into it:
+Pure logic lives in `lib/` (Arduino-free, unit-tested); `src/main.cpp` owns hardware I/O and state
+and calls into it:
 
 - **`lib/decision/decision.{h,cpp}`** — `evaluateSituation()` (priority matrix §3), `nextFlapState()`
   (§5 hysteresis), `nextLowPressAlarm()` (§4), `temperatureBand()`, `situationAlert()`,
   `interpolate()` and the sensor scale tables. All pure functions taking state as parameters.
+- **`lib/ws2812/ws2812.{h,cpp}`** — `alertColor()` and `encodePixelGRB()` (one WS2812B pixel → 9 SPI
+  bytes, 3 SPI bits per WS bit). Pure; the SPI2 transmit lives in `main.cpp` (`ws2812Send()`).
 - `setup()` — serial @115200, status LED, OLED init (blocks in `blinkErrorLED()` on failure),
-  servo attach + close, 12-bit ADC.
+  servo attach + close, WS2812B (SPI2) init, 12-bit ADC.
 - `loop()` @200 ms — read sensors, then run the decision functions and dispatch outputs:
-  `applyFlap()` (twin servos), `applyAlertLed()` (onboard backup LED), `onSituationChange()`
+  `applyFlap()` (twin servos), `applyAlertLed()` (WS2812B primary + PC13 backup), `onSituationChange()`
   (edge-triggered sound/voice — stubbed), and `updateDisplay()`. `main.cpp` holds the evolving
   state (`flapOpen`, `lowPressAlarm`, `prevSituation`).
-- **Tests**: `test/test_decision/` (Unity) run via `pio test -e native` against `lib/decision` —
-  the `native` env excludes `src/` so no hardware/toolchain is needed.
+- **Tests**: `test/test_*/` (Unity) run via `pio test -e native` against `lib/` — the `native` env
+  excludes `src/` so no hardware/toolchain is needed.
 
 **Conventions to preserve:**
-- `lib/decision` stays Arduino-free (pure functions, state passed in) so it builds natively — keep
-  hardware (Servo/OLED/ADC/tone) in `src/main.cpp`. Add a test when you add decision logic.
+- `lib/` modules stay Arduino-free (pure functions, state passed in) so they build natively — keep
+  hardware (Servo/OLED/ADC/SPI/tone) in `src/main.cpp`. Add a test when you add logic.
 - Interpolation x-tables (`resTable`, `vPressureTable` in `lib/decision/decision.cpp`) **must stay
   strictly increasing**, each in sync with its y-table (`tempTable`, `barTable`) — `interpolate()`
   assumes it.
@@ -64,7 +66,7 @@ Notes: `Servo` lib owns **TIM2**, `tone()` owns **TIM3** (shared timers — don'
 CAN uses the USB pins → remove the PA12 USB pull-up. WS2812B needs a level shifter (or ~4.3V supply).
 
 `main.cpp` includes `pins.h` and uses these macros directly — change a pin in `pins.h` only.
-Wired but not yet coded: MP3, buzzer, button, WS2812B, CAN.
+Wired but not yet coded: MP3, buzzer, button, CAN.
 
 ## Layout & workflow
 
