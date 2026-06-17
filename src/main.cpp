@@ -7,6 +7,7 @@
 #include "pins.h"      // pin map (single source of truth)
 #include "decision.h"  // hardware-independent decision logic (unit-tested)
 #include "ws2812.h"    // WS2812B pixel encoding (unit-tested)
+#include "buzzer.h"    // buzzer alert patterns (unit-tested)
 
 // ========== CONFIGURATION ==========
 
@@ -34,6 +35,7 @@ Servo flapServo2;
 // ----- Decision state (held here, evolved by the pure decision functions) -----
 bool flapOpen = false;      // current flap state (hysteresis), starts closed
 bool lowPressAlarm = false; // adaptive low-pressure alarm state (§4)
+bool buzzerSounding = false; // current buzzer tone on/off (avoids retriggering tone())
 int prevSituation = -1;     // last dispatched situation (edge-triggered sound/voice)
 
 // ----- WS2812B RGB LED (primary indicator) -----
@@ -129,9 +131,18 @@ void applyAlertLed(AlertLevel level) {
     digitalWrite(PIN_STATUS_LED, level == ALERT_OFF ? HIGH : LOW);
 }
 
-// ----- SOUND / VOICE (edge-triggered) -----
-// Buzzer (PIN_BUZZER) and MP3 voice (USART1) are wired but not yet driven.
-// TODO: implement buzzer patterns (§3) and voice files (§7); for now log only.
+// ----- BUZZER (per-loop envelope) -----
+// Passive piezo on PIN_BUZZER via tone() (TIM3). The pure pattern/envelope logic
+// lives in lib/buzzer; here we only gate the tone on transitions.
+void applyBuzzer(Situation sit) {
+    bool on = buzzerOnAt(buzzerPattern(sit), millis());
+    if (on && !buzzerSounding)      { tone(PIN_BUZZER, BUZZER_FREQ_HZ); buzzerSounding = true; }
+    else if (!on && buzzerSounding) { noTone(PIN_BUZZER); buzzerSounding = false; }
+}
+
+// ----- VOICE (edge-triggered) -----
+// MP3 voice (USART1) is wired but not yet driven.
+// TODO: trigger voice files (§7) on situation change; for now log only.
 void onSituationChange(Situation sit) {
     Serial.print("Situation -> ");
     Serial.println(situationName(sit));
@@ -215,6 +226,7 @@ void loop() {
     flapOpen = nextFlapState(sit, temperature, flapOpen);
     applyFlap(flapOpen);
     applyAlertLed(situationAlert(sit));
+    applyBuzzer(sit);
     if ((int)sit != prevSituation) { onSituationChange(sit); prevSituation = sit; }
     updateDisplay(sit, temperature, resistance, pressure, vPressure);
 
