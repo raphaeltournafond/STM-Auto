@@ -62,15 +62,15 @@ Library dependencies (auto-installed): Adafruit SSD1306 + Adafruit GFX (firmware
 
 ## Architecture
 
-- **`lib/decision/`** — the decision logic as **pure, Arduino-free functions** (situation matrix,
-  hysteresis state machines, interpolation, sensor conversions). State is passed in as parameters,
-  so it builds and runs natively and is fully unit-testable.
-- **`src/main.cpp`** — owns all hardware I/O (servos, OLED, ADC, LED, serial) and the evolving
-  state, calling into `lib/decision` each 200 ms loop.
+- **`lib/`** — **pure, Arduino-free** logic: `decision/` (situation matrix, hysteresis, interpolation,
+  sensor conversions) and `ws2812/` (WS2812B pixel → SPI byte encoding). State is passed in as
+  parameters, so it builds and runs natively and is fully unit-testable.
+- **`src/main.cpp`** — owns all hardware I/O (servos, OLED, ADC, LEDs, SPI, serial) and the evolving
+  state, calling into `lib/` each 200 ms loop.
 
 ```
 src/            firmware (main.cpp, pins.h)
-lib/decision/   pure decision logic (unit-tested)
+lib/            pure libraries (decision, ws2812) — unit-tested
 test/           Unity test suites (native)
 kicad/stm-auto/ schematic, PCB, wiring notes
 ```
@@ -89,12 +89,11 @@ request and on pushes to `main`.
 ## Status
 
 **Implemented:** temperature + pressure reading, twin-servo thermal regulation with hysteresis, the
-full situation decision matrix with adaptive low-pressure floor, OLED status display, onboard backup
-alert LED, native tests + CI.
+full situation decision matrix with adaptive low-pressure floor, OLED status display, WS2812B RGB
+alert indicator (off/yellow/red) with onboard backup LED, native tests + CI.
 
-**Wired but not yet coded** (pins assigned, schematic complete): WS2812B RGB indicator, buzzer tone
-patterns, MP3 voice prompts, ACK touch button, CAN / engine-RPM input. See `DECISION_MATRIX.md` for
-the roadmap.
+**Wired but not yet coded** (pins assigned, schematic complete): buzzer tone patterns, MP3 voice
+prompts, ACK touch button, CAN / engine-RPM input. See `DECISION_MATRIX.md` for the roadmap.
 
 ## Schematics
 
