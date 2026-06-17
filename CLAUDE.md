@@ -36,12 +36,16 @@ and calls into it:
   bytes, 3 SPI bits per WS bit). Pure; the SPI2 transmit lives in `main.cpp` (`ws2812Send()`).
 - **`lib/buzzer/buzzer.{h,cpp}`** — `buzzerPattern()` (situation → §3 sound pattern) and `buzzerOnAt()`
   (periodic on/off envelope). Pure; `tone()` drive lives in `main.cpp` (`applyBuzzer()`).
+- **`lib/ack/ack.{h,cpp}`** — `updateAck()` acknowledge state machine (§6): mutes sound while keeping
+  LED+screen, re-arms on a higher-priority alert, auto-returns when clear. Pure; the PB5 read + edge
+  detect live in `main.cpp`.
 - `setup()` — serial @115200, status LED, OLED init (blocks in `blinkErrorLED()` on failure),
   servo attach + close, WS2812B (SPI2) init, 12-bit ADC.
 - `loop()` @200 ms — read sensors, then run the decision functions and dispatch outputs:
   `applyFlap()` (twin servos), `applyAlertLed()` (WS2812B primary + PC13 backup), `applyBuzzer()`
-  (piezo via `tone()`), `onSituationChange()` (edge-triggered voice — stubbed), and `updateDisplay()`.
-  `main.cpp` holds the evolving state (`flapOpen`, `lowPressAlarm`, `buzzerSounding`, `prevSituation`).
+  (piezo via `tone()`, muted when acknowledged), `onSituationChange()` (edge-triggered voice — stubbed),
+  and `updateDisplay()`. The PB5 touch button feeds `updateAck()` each loop. `main.cpp` holds the
+  evolving state (`flapOpen`, `lowPressAlarm`, `buzzerSounding`, `ackState`, `prevSituation`).
 - **Tests**: `test/test_*/` (Unity) run via `pio test -e native` against `lib/` — the `native` env
   excludes `src/` so no hardware/toolchain is needed.
 
@@ -68,7 +72,7 @@ Notes: `Servo` lib owns **TIM2**, `tone()` owns **TIM3** (shared timers — don'
 CAN uses the USB pins → remove the PA12 USB pull-up. WS2812B needs a level shifter (or ~4.3V supply).
 
 `main.cpp` includes `pins.h` and uses these macros directly — change a pin in `pins.h` only.
-Wired but not yet coded: MP3, button, CAN.
+Wired but not yet coded: MP3, CAN.
 
 ## Layout & workflow
 
