@@ -102,9 +102,11 @@ Un `.mp3` numéroté par message. Langue : *à confirmer (français présumé)*.
 | Servos volet ×2 (Servo→TIM2) | PA6 / PA7 | LED RGB WS2812B | PB15 |
 | OLED I2C2 | PB10 / PB11 | LED secours intégrée | PC13 |
 | Module MP3 (USART1) | PA9 / PA10 | CAN (SN65HVD230) | PA11 / PA12 |
+| Debug Serial (USART2) | PA2 / PA3 | | |
 
 Alim : 12 V→5 V externe → servos + capteur pression + STM32 (broche 5 V) ; 3,3 V carte → OLED + CAN ;
 masses communes ; 470 µF par servo. CAN = broches USB → retirer le pull-up USB sur PA12.
+USART1 = MP3, USART2 = console de débogage (`Serial` remappé via `build_flags`).
 
 ## 9. Points ouverts
 

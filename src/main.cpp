@@ -9,6 +9,7 @@
 #include "ws2812.h"    // WS2812B pixel encoding (unit-tested)
 #include "buzzer.h"    // buzzer alert patterns (unit-tested)
 #include "ack.h"       // acknowledge state machine (unit-tested)
+#include "voice.h"     // MP3 voice mapping + DFPlayer frames (unit-tested)
 
 // ========== CONFIGURATION ==========
 
@@ -59,6 +60,21 @@ void ws2812ShowAlert(AlertLevel level) {
     ws2812Send(buf, sizeof(buf));
 }
 
+// ----- MP3 voice (DFPlayer Mini on USART1) -----
+// Debug Serial is on USART2 (see platformio.ini build_flags), so USART1 is free.
+const uint8_t MP3_VOLUME = 22; // 0..30
+
+HardwareSerial MP3Serial(PIN_MP3_RX, PIN_MP3_TX);
+
+void dfplayerSend(uint8_t cmd, uint16_t param) {
+    uint8_t frame[DF_FRAME_LEN];
+    dfplayerFrame(cmd, param, frame);
+    MP3Serial.write(frame, DF_FRAME_LEN);
+}
+
+void playVoice(int track) { if (track > 0) dfplayerSend(DF_CMD_PLAY_INDEX, (uint16_t)track); }
+void stopVoice()          { dfplayerSend(DF_CMD_STOP, 0); }
+
 
 // ========== SETUP ==========
 
@@ -95,6 +111,10 @@ void setup() {
     // ----- WS2812B initialization -----
     WS2812_SPI.begin();
     ws2812ShowAlert(ALERT_OFF); // start dark
+
+    // ----- MP3 initialization -----
+    MP3Serial.begin(9600);            // DFPlayer Mini default baud
+    dfplayerSend(DF_CMD_SET_VOLUME, MP3_VOLUME); // best-effort (module may still be booting)
 
     // ----- OTHER Settings -----
     analogReadResolution(12);
@@ -146,11 +166,11 @@ void applyBuzzer(Situation sit, bool muted) {
 }
 
 // ----- VOICE (edge-triggered) -----
-// MP3 voice (USART1) is wired but not yet driven.
-// TODO: trigger voice files (§7) on situation change; for now log only.
+// Play the situation's voice prompt (§7) once when it becomes active.
 void onSituationChange(Situation sit) {
     Serial.print("Situation -> ");
     Serial.println(situationName(sit));
+    playVoice(voiceTrack(sit));
 }
 
 // ----- DISPLAY -----
@@ -232,6 +252,7 @@ void loop() {
     bool ackEdge = ackNow && !prevAckButton; // rising edge = touch
     prevAckButton = ackNow;
     ackState = updateAck(ackState, sit, ackEdge);
+    if (ackEdge && ackState.acked) stopVoice(); // ack also silences an in-progress prompt
 
     // ----- OUTPUTS -----
     flapOpen = nextFlapState(sit, temperature, flapOpen);

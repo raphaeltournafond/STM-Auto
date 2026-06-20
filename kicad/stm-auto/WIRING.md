@@ -15,6 +15,7 @@ KiCad 7 (`stm-auto.kicad_sch`). Convention: rails/buses on **global labels** (`5
 | Buzzer (piezo) | PB6 | decided (below) |
 | ACK touch button | PB5 | decided (below) |
 | MP3 (DFPlayer Mini) | PA9/PA10 | decided (below) |
+| Debug serial header | PA2/PA3 | decided (below) |
 
 ---
 
@@ -93,5 +94,14 @@ generic `Connector_Generic:Conn_01x16` (or download symbol).
   (can damage the amp). #1 DFPlayer mistake.
 - Label these nets **`MP3_RX` / `MP3_TX`** to avoid clashing with the existing `RX`/`TX` labels; mind
   the TX↔RX cross-over.
+- **USART conflict:** the Blue Pill variant defaults `Serial` (debug) to USART1 — the MP3 pins. The
+  firmware reserves USART1 for MP3 and remaps debug `Serial` to **USART2 (PA2/PA3)** via `build_flags`
+  in `platformio.ini`. Add a 3-pin debug header (TX `PA2`, RX `PA3`, GND) for the serial console.
 
 Footprint: 2.54 mm header matching the physical module.
+
+## Debug serial — USART2 (PA2/PA3)
+
+3-pin header to a USB-TTL adapter for the 115200 console (`pio device monitor`). MCU TX `PA2` → adapter
+RX, MCU RX `PA3` ← adapter TX, common GND. `Connector_Generic:Conn_01x03`, footprint
+`Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Vertical`.

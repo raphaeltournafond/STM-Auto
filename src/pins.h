@@ -5,6 +5,8 @@
  *
  * Shared timers (library-owned — keep other PWM off them):
  *   TIM2 = Servo library   |   TIM3 = tone() (buzzer)   |   free: TIM1, TIM4.
+ * UARTs: USART1 = MP3 module   |   USART2 = debug Serial (remapped via build_flags
+ *   in platformio.ini, since the variant defaults Serial to USART1).
  * Power: external 12V->5V converter feeds the servos, pressure sensor and STM32
  *   (5V pin); onboard 3.3V feeds the OLED + CAN transceiver; all grounds common.
  * Levels: analog/ADC pins keep <=3.3V (3.6V abs max). 5V-tolerant: PA9/PA10, PB6/PB7.
@@ -26,9 +28,13 @@
 #define PIN_OLED_SDA      PB11  // I2C2 SDA
 
 // AUDIO
-#define PIN_MP3_TX        PA9   // USART1 TX -> module RX (3.3V module, own decoupled supply)
-#define PIN_MP3_RX        PA10  // USART1 RX <- module TX
+#define PIN_MP3_TX        PA9   // USART1 TX -> module RX (1k series); DFPlayer @ 5V
+#define PIN_MP3_RX        PA10  // USART1 RX <- module TX (5V TX into 5V-tolerant pin)
 #define PIN_BUZZER        PB6   // piezo via tone() (TIM3)
+
+// DEBUG — Serial log @115200 remapped here (build_flags), freeing USART1 for MP3
+#define PIN_DEBUG_TX      PA2   // USART2 TX
+#define PIN_DEBUG_RX      PA3   // USART2 RX
 
 // USER INPUT — capacitive touch module (VCC/GND/OUT); OUT idle LOW, HIGH on touch
 #define PIN_ACK_BUTTON    PB5   // acknowledge; plain INPUT (module drives it), rising edge
@@ -41,6 +47,6 @@
 #define PIN_CAN_RX        PA11
 #define PIN_CAN_TX        PA12
 
-// Free for future use: PA2/PA3 (USART2), PA4/PA5/PA8, PB0/PB1, PB7-PB9, PB12-PB14.
+// Free for future use: PA4/PA5/PA8, PB0/PB1, PB7-PB9, PB12-PB14.
 
 #endif // PINS_H
