@@ -39,13 +39,15 @@ and calls into it:
 - **`lib/ack/ack.{h,cpp}`** — `updateAck()` acknowledge state machine (§6): mutes sound while keeping
   LED+screen, re-arms on a higher-priority alert, auto-returns when clear. Pure; the PB5 read + edge
   detect live in `main.cpp`.
+- **`lib/voice/voice.{h,cpp}`** — `voiceTrack()` (situation → §7 MP3 file) and `dfplayerFrame()`
+  (DFPlayer Mini command frame + checksum). Pure; the USART1 write lives in `main.cpp`.
 - `setup()` — serial @115200, status LED, OLED init (blocks in `blinkErrorLED()` on failure),
   servo attach + close, WS2812B (SPI2) init, 12-bit ADC.
 - `loop()` @200 ms — read sensors, then run the decision functions and dispatch outputs:
   `applyFlap()` (twin servos), `applyAlertLed()` (WS2812B primary + PC13 backup), `applyBuzzer()`
-  (piezo via `tone()`, muted when acknowledged), `onSituationChange()` (edge-triggered voice — stubbed),
-  and `updateDisplay()`. The PB5 touch button feeds `updateAck()` each loop. `main.cpp` holds the
-  evolving state (`flapOpen`, `lowPressAlarm`, `buzzerSounding`, `ackState`, `prevSituation`).
+  (piezo via `tone()`, muted when acknowledged), `onSituationChange()` (edge-triggered MP3 voice via
+  USART1), and `updateDisplay()`. The PB5 touch button feeds `updateAck()` each loop. `main.cpp` holds
+  the evolving state (`flapOpen`, `lowPressAlarm`, `buzzerSounding`, `ackState`, `prevSituation`).
 - **Tests**: `test/test_*/` (Unity) run via `pio test -e native` against `lib/` — the `native` env
   excludes `src/` so no hardware/toolchain is needed.
 
@@ -67,12 +69,15 @@ and calls into it:
 | Flap servos ×2 (Servo→TIM2) | `PA6`/`PA7` | WS2812B RGB LED (SPI2 MOSI+DMA) | `PB15` |
 | MP3 (USART1) | `PA9`/`PA10` | Backup LED (onboard) | `PC13` |
 | CAN RX/TX | `PA11`/`PA12` | ACK touch button | `PB5` |
+| Debug Serial (USART2) | `PA2`/`PA3` | | |
 
 Notes: `Servo` lib owns **TIM2**, `tone()` owns **TIM3** (shared timers — don't reuse them for PWM).
-CAN uses the USB pins → remove the PA12 USB pull-up. WS2812B needs a level shifter (or ~4.3V supply).
+USART1 = MP3, USART2 = debug `Serial` (remapped via `build_flags` in `platformio.ini`, since the
+variant defaults `Serial` to USART1). CAN uses the USB pins → remove the PA12 USB pull-up. WS2812B
+needs a level shifter (or ~4.3V supply).
 
 `main.cpp` includes `pins.h` and uses these macros directly — change a pin in `pins.h` only.
-Wired but not yet coded: MP3, CAN.
+Wired but not yet coded: CAN.
 
 ## Layout & workflow
 

@@ -42,6 +42,7 @@ Pin map (source of truth: [`src/pins.h`](src/pins.h)):
 | Flap servos ×2 (`Servo` → TIM2) | `PA6` / `PA7` | WS2812B RGB LED (SPI2 MOSI+DMA) | `PB15` |
 | MP3 module (USART1) | `PA9` / `PA10` | Onboard backup LED | `PC13` |
 | CAN RX / TX | `PA11` / `PA12` | ACK touch button | `PB5` |
+| Debug Serial (USART2) | `PA2` / `PA3` | | |
 
 Per-peripheral wiring decisions (supply rails, level handling, supporting parts) are documented in
 [`kicad/stm-auto/WIRING.md`](kicad/stm-auto/WIRING.md).
@@ -64,8 +65,8 @@ Library dependencies (auto-installed): Adafruit SSD1306 + Adafruit GFX (firmware
 
 - **`lib/`** — **pure, Arduino-free** logic: `decision/` (situation matrix, hysteresis, interpolation,
   sensor conversions), `ws2812/` (WS2812B pixel → SPI byte encoding), `buzzer/` (alert patterns +
-  envelope), and `ack/` (acknowledge state machine). State is passed in as parameters, so it builds and
-  runs natively and is fully unit-testable.
+  envelope), `ack/` (acknowledge state machine), and `voice/` (MP3 mapping + DFPlayer frames). State is
+  passed in as parameters, so it builds and runs natively and is fully unit-testable.
 - **`src/main.cpp`** — owns all hardware I/O (servos, OLED, ADC, LEDs, SPI, serial) and the evolving
   state, calling into `lib/` each 200 ms loop.
 
@@ -92,10 +93,10 @@ request and on pushes to `main`.
 **Implemented:** temperature + pressure reading, twin-servo thermal regulation with hysteresis, the
 full situation decision matrix with adaptive low-pressure floor, OLED status display, WS2812B RGB
 alert indicator (off/yellow/red) with onboard backup LED, buzzer alert patterns, ACK touch button
-(mutes sound, §6), native tests + CI.
+(mutes sound, §6), MP3 voice prompts (§7), native tests + CI.
 
-**Wired but not yet coded** (pins assigned, schematic complete): MP3 voice prompts, CAN / engine-RPM
-input. See `DECISION_MATRIX.md` for the roadmap.
+**Wired but not yet coded** (pins assigned, schematic complete): CAN / engine-RPM input. See
+`DECISION_MATRIX.md` for the roadmap.
 
 ## Schematics
 
