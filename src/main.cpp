@@ -8,6 +8,7 @@
 #include "decision.h"  // hardware-independent decision logic (unit-tested)
 #include "ws2812.h"    // WS2812B pixel encoding (unit-tested)
 #include "buzzer.h"    // buzzer alert patterns (unit-tested)
+#include "ack.h"       // acknowledge state machine (unit-tested)
 
 // ========== CONFIGURATION ==========
 
@@ -37,6 +38,8 @@ bool flapOpen = false;      // current flap state (hysteresis), starts closed
 bool lowPressAlarm = false; // adaptive low-pressure alarm state (§4)
 bool buzzerSounding = false; // current buzzer tone on/off (avoids retriggering tone())
 int prevSituation = -1;     // last dispatched situation (edge-triggered sound/voice)
+AckState ackState = {false, SIT_COLD}; // acknowledge state (§6)
+bool prevAckButton = false; // previous touch-button level (for rising-edge detect)
 
 // ----- WS2812B RGB LED (primary indicator) -----
 // Driven over SPI2 MOSI (PIN_WS2812_DATA); SCLK/MISO are SPI2's other pins,
@@ -74,6 +77,7 @@ void setup() {
     // ----- Built in initialization -----
     pinMode(PIN_STATUS_LED, OUTPUT);
     digitalWrite(PIN_STATUS_LED, HIGH); // High is off for the built-in LED
+    pinMode(PIN_ACK_BUTTON, INPUT);     // touch module drives the line (no pull)
 
     // ----- OLED Screen initialization -----
     OLED_I2C.begin(); // I2C at 400kHz by default (smoother display)
@@ -134,8 +138,9 @@ void applyAlertLed(AlertLevel level) {
 // ----- BUZZER (per-loop envelope) -----
 // Passive piezo on PIN_BUZZER via tone() (TIM3). The pure pattern/envelope logic
 // lives in lib/buzzer; here we only gate the tone on transitions.
-void applyBuzzer(Situation sit) {
-    bool on = buzzerOnAt(buzzerPattern(sit), millis());
+void applyBuzzer(Situation sit, bool muted) {
+    BuzzerPattern pattern = muted ? BUZZ_SILENT : buzzerPattern(sit);
+    bool on = buzzerOnAt(pattern, millis());
     if (on && !buzzerSounding)      { tone(PIN_BUZZER, BUZZER_FREQ_HZ); buzzerSounding = true; }
     else if (!on && buzzerSounding) { noTone(PIN_BUZZER); buzzerSounding = false; }
 }
@@ -222,11 +227,17 @@ void loop() {
                               : false; // readings unreliable -> drop the adaptive alarm
     Situation sit = evaluateSituation(resistance, vPressure, temperature, pressure, lowPressAlarm);
 
+    // ----- ACKNOWLEDGE (§6) -----
+    bool ackNow = digitalRead(PIN_ACK_BUTTON);
+    bool ackEdge = ackNow && !prevAckButton; // rising edge = touch
+    prevAckButton = ackNow;
+    ackState = updateAck(ackState, sit, ackEdge);
+
     // ----- OUTPUTS -----
     flapOpen = nextFlapState(sit, temperature, flapOpen);
     applyFlap(flapOpen);
-    applyAlertLed(situationAlert(sit));
-    applyBuzzer(sit);
+    applyAlertLed(situationAlert(sit)); // LED stays on even when acknowledged
+    applyBuzzer(sit, ackState.acked);   // ack mutes the buzzer
     if ((int)sit != prevSituation) { onSituationChange(sit); prevSituation = sit; }
     updateDisplay(sit, temperature, resistance, pressure, vPressure);
 
