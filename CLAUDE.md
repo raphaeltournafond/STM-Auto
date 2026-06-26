@@ -41,13 +41,20 @@ and calls into it:
   detect live in `main.cpp`.
 - **`lib/voice/voice.{h,cpp}`** — `voiceTrack()` (situation → §7 MP3 file) and `dfplayerFrame()`
   (DFPlayer Mini command frame + checksum). Pure; the USART1 write lives in `main.cpp`.
-- `setup()` — serial @115200, status LED, OLED init (blocks in `blinkErrorLED()` on failure),
-  servo attach + close, WS2812B (SPI2) init, 12-bit ADC.
-- `loop()` @200 ms — read sensors, then run the decision functions and dispatch outputs:
-  `applyFlap()` (twin servos), `applyAlertLed()` (WS2812B primary + PC13 backup), `applyBuzzer()`
-  (piezo via `tone()`, muted when acknowledged), `onSituationChange()` (edge-triggered MP3 voice via
-  USART1), and `updateDisplay()`. The PB5 touch button feeds `updateAck()` each loop. `main.cpp` holds
-  the evolving state (`flapOpen`, `lowPressAlarm`, `buzzerSounding`, `ackState`, `prevSituation`).
+- **`lib/lifecycle/lifecycle.{h,cpp}`** — INIT helpers (§2): `tempSensorPlausible()`/
+  `pressSensorPlausible()`, `initResultLabel()`, `initFailVoiceTrack()`. Pure.
+- `setup()` — runs the **BOOT → INIT** life phases (§2): C-major arpeggio (C5-E5-G5-C6) synced
+  with LED blinks, then a POST-style checklist for the blocking self-tests (OLED → MP3 → temp →
+  pressure → flap cycle). A failed check calls `enterInitFail()` (red LED + fault voice + long beeps);
+  the ACK button bypasses it. INIT OK plays the track-1 ready jingle then runs a gauge sweep
+  animation (0 % → 100 % → real values; error rows blink instead of sweeping) before entering `loop()`.
+- `loop()` @200 ms — read sensors, run the decision functions, dispatch outputs: `applyFlap()` (twin
+  servos), `applyAlertLed()` (WS2812B primary + PC13 backup), `applyBuzzer()` (piezo via `tone()`,
+  muted when acknowledged), `onSituationChange()` (edge-triggered MP3 voice via USART1), and
+  `updateDisplay()` throttled to 500 ms with `OLED_I2C.begin()` before each frame (STM32F103 I2C
+  BUSY-flag errata). The 200 ms wait is split into 10 × 20 ms polls so ACK taps are never missed.
+  `main.cpp` holds the evolving state (`flapOpen`, `lowPressAlarm`, `buzzerSounding`, `ackState`,
+  `prevSituation`).
 - **Tests**: `test/test_*/` (Unity) run via `pio test -e native` against `lib/` — the `native` env
   excludes `src/` so no hardware/toolchain is needed.
 
@@ -81,6 +88,6 @@ Wired but not yet coded: CAN.
 
 ## Layout & workflow
 
-- `src/` firmware · `kicad/stm-auto/` schematic+PCB · `lib`/`include`/`test` placeholders · `.pio/` build (gitignored).
+- `src/` firmware · `kicad/stm-auto/` schematic+PCB · `sounds/` MP3 voice files (tracks 1-5, §7) · `lib`/`include`/`test` placeholders · `.pio/` build (gitignored).
 - Feature-branch + PR into `main`; Conventional Commits referencing the issue (`#12 feat!: ...`).
 - Keep `pins.h` and `DECISION_MATRIX.md` in sync with code — both lead the firmware.

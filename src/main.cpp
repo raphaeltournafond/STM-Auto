@@ -10,6 +10,7 @@
 #include "buzzer.h"    // buzzer alert patterns (unit-tested)
 #include "ack.h"       // acknowledge state machine (unit-tested)
 #include "voice.h"     // MP3 voice mapping + DFPlayer frames (unit-tested)
+#include "lifecycle.h" // INIT self-test helpers (unit-tested)
 
 // ========== CONFIGURATION ==========
 
@@ -76,48 +77,216 @@ void playVoice(int track) { if (track > 0) dfplayerSend(DF_CMD_PLAY_INDEX, (uint
 void stopVoice()          { dfplayerSend(DF_CMD_STOP, 0); }
 
 
-// ========== SETUP ==========
+// ========== SETUP (BOOT + INIT, DECISION_MATRIX §2) ==========
 
-void blinkErrorLED() {
+float readTemperatureResistance(); // defined below; needed by the INIT checks
+float readPressureVoltage();
+
+bool oledOk = false; // set by the OLED self-test; gates display use afterwards
+
+void initShow(uint8_t stepsDone) {
+    if (!oledOk) return;
+    static const char* const steps[] = {"OLED", "MP3", "TEMP", "PRESS", "SERVO"};
+    const uint8_t N = 5;
+    display.clearDisplay();
+    display.setTextWrap(false);
+    display.setTextColor(SSD1306_WHITE);
+    display.setTextSize(1);
+    display.setCursor(40, 4);
+    display.print("SWEE.BRZ");
+    if (stepsDone >= N) {
+        display.setTextSize(2);
+        display.setCursor(28, 30);
+        display.print("READY!");
+    } else {
+        for (uint8_t i = 0; i < N; i++) {
+            display.setTextSize(1);
+            display.setCursor(4, 16 + i * 9);
+            if      (i < stepsDone)  display.print("[OK] ");
+            else if (i == stepsDone) display.print("[>>] ");
+            else                     display.print("[  ] ");
+            display.print(steps[i]);
+        }
+    }
+    display.display();
+}
+
+// INIT_FAIL (§2): red LED, fault voice, long beeps, error on screen. Blocks until
+// the operator presses ACK to bypass (deliberate sensor-unplugged override).
+void enterInitFail(InitResult r) {
+    ws2812ShowAlert(ALERT_ALARM);
+    digitalWrite(PIN_STATUS_LED, LOW); // backup LED on (active LOW)
+    playVoice(initFailVoiceTrack(r));
+    if (oledOk) {
+        display.clearDisplay();
+        display.setTextWrap(false);
+        display.setTextColor(SSD1306_WHITE);
+        // Yellow zone: alert header centred
+        display.setTextSize(1);
+        display.setCursor(19, 4);
+        display.print("!! INIT FAIL !!");
+        // Blue zone: failed component + bypass instruction
+        display.setCursor(2, 22);
+        display.print(initResultLabel(r));
+        display.setCursor(2, 38);
+        display.print("Check connections.");
+        display.setCursor(2, 52);
+        display.print("ACK to bypass.");
+        display.display();
+    }
+    bool prevAck = false;
     while (true) {
-        digitalWrite(PIN_STATUS_LED, HIGH); delay(250);
-        digitalWrite(PIN_STATUS_LED, LOW);  delay(250);
+        tone(PIN_BUZZER, BUZZER_FREQ_HZ);
+        for (uint8_t i = 0; i < 12; i++) {       // 600 ms on
+            bool ackNow = digitalRead(PIN_ACK_BUTTON);
+            if (ackNow && !prevAck) {
+                noTone(PIN_BUZZER);
+                tone(PIN_BUZZER, BUZZER_FREQ_HZ); delay(60); noTone(PIN_BUZZER);
+                return;
+            }
+            prevAck = ackNow;
+            delay(50);
+        }
+        noTone(PIN_BUZZER);
+        for (uint8_t i = 0; i < 8; i++) {        // 400 ms off
+            bool ackNow = digitalRead(PIN_ACK_BUTTON);
+            if (ackNow && !prevAck) {
+                tone(PIN_BUZZER, BUZZER_FREQ_HZ); delay(60); noTone(PIN_BUZZER);
+                return;
+            }
+            prevAck = ackNow;
+            delay(50);
+        }
+    }
+}
+
+// tFill/pFill override gauge fill widths for animation; INVERSE text auto-inverts with the fill.
+static void bootGaugeFrame(float temperature, float pressure, bool tErr, bool pErr,
+                            int tLen, int pLen, int tFill, int pFill) {
+    display.clearDisplay();
+    display.setTextWrap(false);
+    display.setTextColor(SSD1306_WHITE);
+    display.setTextSize(1);
+    display.setCursor(40, 4);
+    display.print("SWEE.BRZ");
+    display.setTextSize(3);
+    if (tFill > 0) display.fillRect(0, 16, tFill > 128 ? 128 : tFill, 24, SSD1306_WHITE);
+    if (tErr) {
+        display.setTextColor(SSD1306_INVERSE);
+        display.setCursor(37, 16); display.print("ERR");
+    } else {
+        display.setTextColor(SSD1306_INVERSE);
+        display.setCursor((128 - tLen * 18) / 2, 16);
+        display.print((int)temperature); display.write(247); display.print("C");
+    }
+    display.drawFastHLine(0, 40, 128, SSD1306_WHITE);
+    if (pFill > 0) display.fillRect(0, 41, pFill > 128 ? 128 : pFill, 23, SSD1306_WHITE);
+    if (pErr) {
+        display.setTextColor(SSD1306_INVERSE);
+        display.setCursor(37, 42); display.print("ERR");
+    } else {
+        display.setTextColor(SSD1306_INVERSE);
+        display.setCursor((128 - pLen * 18) / 2, 42);
+        display.print(pressure, 1); display.print("b");
+    }
+    OLED_I2C.begin();
+    display.display();
+}
+
+void gaugeBootAnimation() {
+    if (!oledOk) return;
+    float resistance  = readTemperatureResistance();
+    float temperature = temperatureFromResistance(resistance);
+    float vPressure   = readPressureVoltage();
+    float pressure    = pressureFromVoltage(vPressure);
+    const bool tErr = resistance >= TEMP_MAX_SAFE_RESISTANCE;
+    const bool pErr = vPressure  < PRESS_MIN_SAFE_VOLTAGE;
+    const int  tLen = ((int)temperature >= 100) ? 5 : 4;
+    const int  pLen = (pressure >= 10.0f) ? 5 : 4;
+    const int  tTgt = tErr ? 0 : (int)(constrain((temperature - 40.0f) / (150.0f - 40.0f), 0.0f, 1.0f) * 128.0f);
+    const int  pTgt = pErr ? 0 : (int)(constrain(pressure / 8.0f, 0.0f, 1.0f) * 128.0f);
+
+    uint32_t blinkMs = millis();
+    bool     blinkOn = false;
+
+    for (int w = 0; w <= 128; w += 4) {
+        if (millis() - blinkMs >= 150) { blinkOn = !blinkOn; blinkMs = millis(); }
+        int ef = blinkOn ? 128 : 0;
+        bootGaugeFrame(temperature, pressure, tErr, pErr, tLen, pLen,
+                       tErr ? ef : w, pErr ? ef : w);
+        delay(8);
+    }
+    if (millis() - blinkMs >= 150) { blinkOn = !blinkOn; blinkMs = millis(); }
+    bootGaugeFrame(temperature, pressure, tErr, pErr, tLen, pLen,
+                   tErr ? (blinkOn ? 128 : 0) : 128,
+                   pErr ? (blinkOn ? 128 : 0) : 128);
+    delay(80);
+
+    for (int s = 0; s <= 10; s++) {
+        if (millis() - blinkMs >= 150) { blinkOn = !blinkOn; blinkMs = millis(); }
+        int ef = blinkOn ? 128 : 0;
+        bootGaugeFrame(temperature, pressure, tErr, pErr, tLen, pLen,
+                       tErr ? ef : 128 + (tTgt - 128) * s / 10,
+                       pErr ? ef : 128 + (pTgt - 128) * s / 10);
+        delay(12);
     }
 }
 
 void setup() {
-    Serial.begin(115200);
-
-    delay(500); // important to let the screen initialize
-
-    // ----- Built in initialization -----
+    // ===== BOOT =====
+    Serial.begin(115200);                 // debug on USART2 (build_flags)
     pinMode(PIN_STATUS_LED, OUTPUT);
-    digitalWrite(PIN_STATUS_LED, HIGH); // High is off for the built-in LED
-    pinMode(PIN_ACK_BUTTON, INPUT);     // touch module drives the line (no pull)
+    digitalWrite(PIN_STATUS_LED, HIGH);   // HIGH = off (active LOW)
+    pinMode(PIN_ACK_BUTTON, INPUT);       // touch module drives the line (no pull)
+    analogReadResolution(12);
+    WS2812_SPI.begin();
+    ws2812ShowAlert(ALERT_OFF);
+    MP3Serial.begin(9600);                // DFPlayer Mini default baud
 
-    // ----- OLED Screen initialization -----
-    OLED_I2C.begin(); // I2C at 400kHz by default (smoother display)
-    if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) blinkErrorLED();
+    delay(500); // let the screen + DFPlayer power up
 
-    display.clearDisplay();
-    display.display();
-
-    // ----- SERVO initialization -----
+    // C major arpeggio (C5-E5-G5-C6) synced with LED blink
+    static const uint16_t bootNotes[] = {523, 659, 784, 1047};
+    for (uint8_t i = 0; i < 4; i++) {
+        tone(PIN_BUZZER, bootNotes[i]);
+        digitalWrite(PIN_STATUS_LED, LOW);  delay(100);
+        noTone(PIN_BUZZER);
+        digitalWrite(PIN_STATUS_LED, HIGH); delay(60);
+    }
+    for (uint8_t i = 0; i < 2; i++) {
+        digitalWrite(PIN_STATUS_LED, LOW);  delay(80);
+        digitalWrite(PIN_STATUS_LED, HIGH); delay(80);
+    }
+    // Servos parked before INIT so flaps stay controlled through any blocking check.
     flapServo1.attach(PIN_SERVO_FLAP_1);
     flapServo2.attach(PIN_SERVO_FLAP_2);
     flapServo1.write(FLAP_CLOSED);
     flapServo2.write(FLAP_CLOSED);
+    dfplayerSend(DF_CMD_SET_VOLUME, MP3_VOLUME); // before INIT so fail voice is at the right level
 
-    // ----- WS2812B initialization -----
-    WS2812_SPI.begin();
-    ws2812ShowAlert(ALERT_OFF); // start dark
+    // ===== INIT =====
+    OLED_I2C.begin();
+    oledOk = display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS);
+    if (!oledOk) enterInitFail(INIT_FAIL_OLED);
+    initShow(1); delay(400);
 
-    // ----- MP3 initialization -----
-    MP3Serial.begin(9600);            // DFPlayer Mini default baud
-    dfplayerSend(DF_CMD_SET_VOLUME, MP3_VOLUME); // best-effort (module may still be booting)
+    // TODO: real DFPlayer SD-presence query (parse status frame); assumed OK for now.
+    initShow(2); delay(400);
 
-    // ----- OTHER Settings -----
-    analogReadResolution(12);
+    if (!tempSensorPlausible(readTemperatureResistance())) enterInitFail(INIT_FAIL_TEMP);
+    initShow(3); delay(400);
+
+    if (!pressSensorPlausible(readPressureVoltage())) enterInitFail(INIT_FAIL_PRESS);
+    initShow(4); delay(400);
+
+    flapServo1.write(FLAP_CLOSED); flapServo2.write(FLAP_CLOSED); delay(400);
+    flapServo1.write(FLAP_OPEN);   flapServo2.write(FLAP_OPEN);   delay(400);
+    flapServo1.write(FLAP_CLOSED); flapServo2.write(FLAP_CLOSED);
+
+    // ===== INIT OK -> RUN =====
+    playVoice(1);
+    initShow(5); delay(400);
+    gaugeBootAnimation();
 }
 
 
@@ -177,58 +346,88 @@ void onSituationChange(Situation sit) {
 
 void updateDisplay(Situation sit, float temperature, float resistance, float pressure, float vPressure) {
     display.clearDisplay();
+    display.setTextWrap(false);
+
+    const bool tempErr  = resistance >= TEMP_MAX_SAFE_RESISTANCE;
+    const bool pressErr = vPressure < PRESS_MIN_SAFE_VOLTAGE;
+
+    // Yellow zone (y=0-15): situation label; alerts invert the strip for visibility.
+    const bool isAlert = situationAlert(sit) != ALERT_OFF;
+    if (isAlert) {
+        display.fillRect(0, 0, 128, 16, SSD1306_WHITE);
+        display.setTextColor(SSD1306_BLACK);
+    } else {
+        display.setTextColor(SSD1306_WHITE);
+    }
+    display.setTextSize(1);
+    display.setCursor(2, 4);
+    switch (sit) {
+        case SIT_STOP_ENGINE:      display.print("!! STOP ENGINE !!"); break;
+        case SIT_TEMP_SENSOR_ERR:  display.print("TEMP SENSOR ERROR"); break;
+        case SIT_PRESS_SENSOR_ERR: display.print("PRESS SENSOR ERROR"); break;
+        case SIT_LOW_PRESSURE:     display.print("LOW OIL PRESSURE"); break;
+        case SIT_OVERPRESSURE:     display.print("OVERPRESSURE"); break;
+        case SIT_MILD_OVERHEAT:
+            display.print("OIL HOT!  FLAP:");
+            display.print(flapOpen ? "OPEN" : "CLSD");
+            break;
+        case SIT_REGULATION:
+            display.print("REGULATING FLAP:");
+            display.print(flapOpen ? "OPEN" : "CLSD");
+            break;
+        case SIT_NORMAL:
+            display.print("NORMAL    FLAP:");
+            display.print(flapOpen ? "OPEN" : "CLSD");
+            break;
+        case SIT_COLD:
+            display.print("COLD      FLAP:");
+            display.print(flapOpen ? "OPEN" : "CLSD");
+            break;
+    }
     display.setTextColor(SSD1306_WHITE);
 
-    display.setTextSize(1);
-    display.setCursor(0, 0);
-    display.println("SWEE.BRZ OIL MONITOR");
-
-    // --- TEMPERATURE ---
-    display.setCursor(0, 16);
-    if (resistance >= TEMP_MAX_SAFE_RESISTANCE) {
-        display.println("TEMPERATURE ERROR!");
-        display.setCursor(0, 26);
-        display.println("-> check wiring");
+    // Blue zone top (y=16-39): temperature, size-3 with liquid-fill gauge background.
+    display.setTextSize(3);
+    if (tempErr) {
+        display.setCursor(37, 16);
+        display.print("ERR");
     } else {
-        display.print("T:"); display.print((int)temperature); display.write(247); display.println("C");
-        display.setCursor(0, 26);
-        display.print("R:"); display.print((int)resistance); display.println(" Ohm");
+        int fillW = (int)(constrain((temperature - 40.0f) / (150.0f - 40.0f), 0.0f, 1.0f) * 128.0f);
+        if (fillW > 0) display.fillRect(0, 16, fillW, 24, SSD1306_WHITE);
+        int len = ((int)temperature >= 100) ? 5 : 4;
+        display.setTextColor(SSD1306_INVERSE);
+        display.setCursor((128 - len * 18) / 2, 16);
+        display.print((int)temperature);
+        display.write(247);
+        display.print("C");
     }
 
-    // --- PRESSURE ---
-    display.setCursor(0, 36);
-    if (vPressure < PRESS_MIN_SAFE_VOLTAGE) {
-        display.println("PRESSURE ERROR!");
-        display.setCursor(0, 46);
-        display.println("-> check wiring");
-    } else {
-        display.print("PRES:"); display.print(pressure, 1); display.println(" BAR");
-        display.setCursor(0, 46);
-        display.print("V:"); display.print(vPressure, 2); display.println("v");
-    }
+    display.drawFastHLine(0, 40, 128, SSD1306_WHITE);
 
-    // --- STATUS banner (active situation; sensor errors already shown above) ---
-    display.setCursor(0, 56);
-    switch (sit) {
-        case SIT_STOP_ENGINE:
-            display.println("STOP ENGINE!");
-            break;
-        case SIT_LOW_PRESSURE:
-            display.print("LOW PRESS! "); display.print(pressure, 1); display.println("b");
-            break;
-        case SIT_OVERPRESSURE:
-            display.print("OVER PRESS "); display.print(pressure, 1); display.println("b");
-            break;
-        case SIT_MILD_OVERHEAT:
-            display.println("TEMP HIGH!");
-            break;
-        default: // sensor errors + REGULATION / NORMAL / COLD
-            display.print("FLAP: ");
-            display.println(flapOpen ? "OPEN" : "CLOSED");
-            break;
+    // Blue zone bottom (y=41-63): pressure gauge.
+    display.setTextSize(3);
+    if (pressErr) {
+        display.setCursor(37, 42);
+        display.print("ERR");
+    } else {
+        int fillW = (int)(constrain(pressure / 8.0f, 0.0f, 1.0f) * 128.0f);
+        if (fillW > 0) display.fillRect(0, 41, fillW, 23, SSD1306_WHITE);
+        int len = (pressure >= 10.0f) ? 5 : 4;
+        display.setTextColor(SSD1306_INVERSE);
+        display.setCursor((128 - len * 18) / 2, 42);
+        display.print(pressure, 1);
+        display.print("b");
     }
 
     display.display();
+}
+
+
+// On an ACK rising edge: mute an in-progress voice prompt and give a feedback blip.
+void onAckPress() {
+    if (ackState.acked) stopVoice();
+    tone(PIN_BUZZER, BUZZER_FREQ_HZ); delay(60); noTone(PIN_BUZZER);
+    buzzerSounding = false;
 }
 
 
@@ -251,8 +450,8 @@ void loop() {
     bool ackNow = digitalRead(PIN_ACK_BUTTON);
     bool ackEdge = ackNow && !prevAckButton; // rising edge = touch
     prevAckButton = ackNow;
-    ackState = updateAck(ackState, sit, ackEdge);
-    if (ackEdge && ackState.acked) stopVoice(); // ack also silences an in-progress prompt
+    ackState = updateAck(ackState, sit, ackEdge); // every loop: handles auto-return / re-arm
+    if (ackEdge) onAckPress();
 
     // ----- OUTPUTS -----
     flapOpen = nextFlapState(sit, temperature, flapOpen);
@@ -260,7 +459,22 @@ void loop() {
     applyAlertLed(situationAlert(sit)); // LED stays on even when acknowledged
     applyBuzzer(sit, ackState.acked);   // ack mutes the buzzer
     if ((int)sit != prevSituation) { onSituationChange(sit); prevSituation = sit; }
-    updateDisplay(sit, temperature, resistance, pressure, vPressure);
+    static uint32_t lastDisplayMs = 0;
+    uint32_t nowMs = millis();
+    if (oledOk && (nowMs - lastDisplayMs >= 500)) {
+        lastDisplayMs = nowMs;
+        OLED_I2C.begin(); // STM32F103 I2C BUSY-flag errata: re-init before each frame
+        updateDisplay(sit, temperature, resistance, pressure, vPressure);
+    }
 
-    delay(200);
+    // Split the 200 ms wait into 20 ms slices so short ACK taps are never missed.
+    for (uint8_t i = 0; i < 10; i++) {
+        delay(20);
+        bool ackNow = digitalRead(PIN_ACK_BUTTON);
+        if (ackNow && !prevAckButton) {
+            ackState = updateAck(ackState, sit, true);
+            onAckPress();
+        }
+        prevAckButton = ackNow;
+    }
 }

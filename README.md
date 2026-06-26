@@ -65,8 +65,9 @@ Library dependencies (auto-installed): Adafruit SSD1306 + Adafruit GFX (firmware
 
 - **`lib/`** — **pure, Arduino-free** logic: `decision/` (situation matrix, hysteresis, interpolation,
   sensor conversions), `ws2812/` (WS2812B pixel → SPI byte encoding), `buzzer/` (alert patterns +
-  envelope), `ack/` (acknowledge state machine), and `voice/` (MP3 mapping + DFPlayer frames). State is
-  passed in as parameters, so it builds and runs natively and is fully unit-testable.
+  envelope), `ack/` (acknowledge state machine), `voice/` (MP3 mapping + DFPlayer frames), and
+  `lifecycle/` (INIT self-test helpers). State is passed in as parameters, so it builds and runs
+  natively and is fully unit-testable.
 - **`src/main.cpp`** — owns all hardware I/O (servos, OLED, ADC, LEDs, SPI, serial) and the evolving
   state, calling into `lib/` each 200 ms loop.
 
@@ -74,6 +75,7 @@ Library dependencies (auto-installed): Adafruit SSD1306 + Adafruit GFX (firmware
 src/            firmware (main.cpp, pins.h)
 lib/            pure libraries (decision, ws2812) — unit-tested
 test/           Unity test suites (native)
+sounds/         MP3 voice prompts for the DFPlayer SD card (§7)
 kicad/stm-auto/ schematic, PCB, wiring notes
 ```
 
@@ -90,10 +92,11 @@ request and on pushes to `main`.
 
 ## Status
 
-**Implemented:** temperature + pressure reading, twin-servo thermal regulation with hysteresis, the
-full situation decision matrix with adaptive low-pressure floor, OLED status display, WS2812B RGB
-alert indicator (off/yellow/red) with onboard backup LED, buzzer alert patterns, ACK touch button
-(mutes sound, §6), MP3 voice prompts (§7), native tests + CI.
+**Implemented:** `BOOT→INIT→RUN` life phases with blocking self-tests (§2), temperature + pressure
+reading, twin-servo thermal regulation with hysteresis, the full situation decision matrix with
+adaptive low-pressure floor, OLED status display, WS2812B RGB alert indicator (off/yellow/red) with
+onboard backup LED, buzzer alert patterns, ACK touch button (mutes sound, §6), MP3 voice prompts (§7),
+native tests + CI.
 
 **Wired but not yet coded** (pins assigned, schematic complete): CAN / engine-RPM input. See
 `DECISION_MATRIX.md` for the roadmap.
