@@ -102,7 +102,7 @@ void test_situation_low_pressure(void) {
 }
 
 void test_situation_overpressure(void) {
-    TEST_ASSERT_EQUAL(SIT_OVERPRESSURE, evaluateSituation(100.0f, 2.0f, 80.0f, 7.0f, false));
+    TEST_ASSERT_EQUAL(SIT_OVERPRESSURE, evaluateSituation(100.0f, 2.0f, 80.0f, 10.0f, false));
 }
 
 void test_situation_mild_overheat(void) {

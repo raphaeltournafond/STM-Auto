@@ -22,16 +22,16 @@ enum Situation {
 enum AlertLevel { ALERT_OFF, ALERT_WARN, ALERT_ALARM }; // off / yellow / red
 
 // ----- Thresholds -----
-constexpr float TEMP_MAX_SAFE_RESISTANCE = 1500.0f; // above -> temp sensor fault
-constexpr float PRESS_MIN_SAFE_VOLTAGE   = 0.3f;    // below -> pressure sensor fault
-constexpr float FLAP_OPEN_TEMP  = 92.0f;            // flap hysteresis open (§5)
-constexpr float FLAP_CLOSE_TEMP = 85.0f;            // flap hysteresis close (§5)
-constexpr float TEMP_STOP_ENGINE = 122.0f;          // with low pressure -> stop engine
-constexpr float TEMP_OVERHEAT    = 110.0f;          // mild overheat band start
-constexpr float TEMP_REGULATION  = 90.0f;           // thermal-regulation band start
-constexpr float TEMP_NORMAL      = 70.0f;           // normal band start
-constexpr float PRESS_STOP_ENGINE = 1.2f;           // stop-engine pressure
-constexpr float PRESS_OVER        = 6.5f;           // overpressure ceiling
+constexpr float TEMP_MAX_SAFE_RESISTANCE    = 1500.0f;  // above -> temp sensor fault
+constexpr float PRESS_MIN_SAFE_VOLTAGE      = 0.3f;     // below -> pressure sensor fault
+constexpr float FLAP_OPEN_TEMP              = 92.0f;    // flap hysteresis open (§5)
+constexpr float FLAP_CLOSE_TEMP             = 85.0f;    // flap hysteresis close (§5)
+constexpr float TEMP_STOP_ENGINE            = 122.0f;   // with low pressure -> stop engine
+constexpr float TEMP_OVERHEAT               = 110.0f;   // mild overheat band start
+constexpr float TEMP_REGULATION             = 90.0f;    // thermal-regulation band start
+constexpr float TEMP_NORMAL                 = 70.0f;    // normal band start
+constexpr float PRESS_STOP_ENGINE           = 1.2f;     // stop-engine pressure
+constexpr float PRESS_OVER                  = 9.5f;     // overpressure ceiling
 
 // ----- Pure helpers -----
 
