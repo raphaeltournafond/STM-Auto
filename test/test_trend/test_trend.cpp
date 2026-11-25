@@ -95,10 +95,12 @@ void test_stats_ignore_sensor_faults(void) {
 }
 
 void test_low_press_floor_follows_band(void) {
-    TEST_ASSERT_EQUAL_FLOAT(1.5f, lowPressCritical(50.0f));  // §4 < 70 °C
-    TEST_ASSERT_EQUAL_FLOAT(0.9f, lowPressCritical(80.0f));
-    TEST_ASSERT_EQUAL_FLOAT(0.8f, lowPressCritical(100.0f));
-    TEST_ASSERT_EQUAL_FLOAT(0.6f, lowPressCritical(115.0f));
+    // One floor per §4 band, at least the generic minimum (calibration may raise it).
+    TEST_ASSERT_TRUE(lowPressCritical(50.0f)  >= PRESS_CRITICAL_MIN[0]); // < 70 °C
+    TEST_ASSERT_TRUE(lowPressCritical(80.0f)  >= PRESS_CRITICAL_MIN[1]);
+    TEST_ASSERT_TRUE(lowPressCritical(100.0f) >= PRESS_CRITICAL_MIN[2]);
+    TEST_ASSERT_TRUE(lowPressCritical(115.0f) >= PRESS_CRITICAL_MIN[3]);
+    TEST_ASSERT_EQUAL_FLOAT(lowPressCritical(80.0f), lowPressCritical(89.9f)); // same band
 }
 
 int main(int, char**) {

@@ -10,8 +10,23 @@ static const float barTable[]       = {0.0, 1.0,  2.0,  3.5,  5.0,  6.5,  8.0,  
 static const uint8_t pressTableSize = sizeof(vPressureTable) / sizeof(vPressureTable[0]);
 
 // ----- Adaptive low-pressure floor (§4), indexed by temperature band 0..4 -----
-static const float pressCritical[] = {1.5f, 0.9f, 0.8f, 0.6f, 1.2f}; // alarm below
-static const float pressRearm[]    = {1.8f, 1.1f, 1.0f, 0.8f, 1.2f}; // clear at/above
+// Vehicle-calibrated floors: regenerate with scripts/analyze_log.py from logged
+// drives (README "Calibration"). Band 4 (> 122 °C) is the stop-engine pairing,
+// left as-is. Never below PRESS_*_MIN (decision.h), enforced below.
+static constexpr float pressCritical[] = {1.50f, 0.90f, 0.80f, 0.60f, 1.20f}; // alarm below
+static constexpr float pressRearm[]    = {1.80f, 1.10f, 1.00f, 0.80f, 1.20f}; // clear at/above
+
+static_assert(sizeof(pressCritical) == sizeof(PRESS_CRITICAL_MIN) &&
+              sizeof(pressRearm) == sizeof(PRESS_REARM_MIN), "one floor per temperature band");
+
+// Each band: calibrated floor >= generic minimum, and rearm >= critical.
+constexpr bool floorsValid(int b) {
+    return b >= 5 || (pressCritical[b] >= PRESS_CRITICAL_MIN[b] &&
+                      pressRearm[b] >= PRESS_REARM_MIN[b] &&
+                      pressRearm[b] >= pressCritical[b] && floorsValid(b + 1));
+}
+static_assert(floorsValid(0), "calibrated low-pressure floors must never go below "
+                              "PRESS_CRITICAL_MIN / PRESS_REARM_MIN, and rearm >= critical");
 
 float interpolate(float x, const float* xTable, const float* yTable, uint8_t size) {
     if (x <= xTable[0]) return yTable[0];
@@ -52,6 +67,10 @@ uint8_t temperatureBand(float temperature) {
 
 float lowPressCritical(float temperature) {
     return pressCritical[temperatureBand(temperature)];
+}
+
+float lowPressRearm(float temperature) {
+    return pressRearm[temperatureBand(temperature)];
 }
 
 bool nextLowPressAlarm(bool prev, float temperature, float pressure) {

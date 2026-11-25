@@ -111,7 +111,7 @@ void test_ack_mutes_then_higher_priority_rearms(void) {
     hold(&s, 112.0f, 2.5f, 1, true);              // ACK
     TEST_ASSERT_TRUE(s.ack.acked);
 
-    RunResult r = hold(&s, 112.0f, 0.4f, 5);      // pressure collapses -> LOW PRESSURE
+    RunResult r = hold(&s, 112.0f, lowPressCritical(112.0f) * 0.5f, 5); // pressure collapses -> LOW PRESSURE
     TEST_ASSERT_EQUAL_INT(SIT_LOW_PRESSURE, r.sit);
     TEST_ASSERT_FALSE(s.ack.acked);               // higher priority re-arms sound
     TEST_ASSERT_TRUE(r.alertMask & (1u << SIT_MILD_OVERHEAT)); // both alarms on screen

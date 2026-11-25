@@ -30,6 +30,8 @@ jobs:
         run: pip install --upgrade platformio
       - name: Run native unit tests
         run: pio test -e native
+      - name: Smoke-test the calibration script
+        run: python scripts/analyze_log.py scripts/testdata/sample_drive.log --min-samples 60
 
   build:
     name: Firmware build (bluepill_f103c8)
