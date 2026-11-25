@@ -39,7 +39,7 @@ Pin map (source of truth: [`src/pins.h`](src/pins.h)):
 |---|---|---|---|
 | Pressure sensor | `PA0` | Buzzer (`tone()` → TIM3) | `PB6` |
 | Temperature sensor | `PA1` | OLED SCL / SDA (I2C2) | `PB10` / `PB11` |
-| Flap servos ×2 (`Servo` → TIM2) | `PA6` / `PA7` | WS2812B RGB LED (SPI2 MOSI+DMA) | `PB15` |
+| Flap servos ×2 (`Servo` → TIM2) | `PA6` / `PA7` | WS2812B RGB LED (SPI2 MOSI; PB13/PB14 reserved) | `PB15` |
 | MP3 module (USART1) | `PA9` / `PA10` | Onboard backup LED | `PC13` |
 | CAN RX / TX | `PA11` / `PA12` | ACK touch button | `PB5` |
 | Debug Serial (USART2) | `PA2` / `PA3` | | |

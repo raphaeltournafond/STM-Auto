@@ -63,6 +63,16 @@ void test_pressSensorFault(void) {
     TEST_ASSERT_FALSE(pressSensorFault(0.5f));                  // 0 bar, sensor present
     TEST_ASSERT_FALSE(pressSensorFault(PRESS_MIN_SAFE_VOLTAGE)); // boundary valid
     TEST_ASSERT_TRUE(pressSensorFault(0.1f));                   // disconnected
+    TEST_ASSERT_FALSE(pressSensorFault(3.01f));                 // 10 bar, table end
+    TEST_ASSERT_FALSE(pressSensorFault(PRESS_MAX_SAFE_VOLTAGE)); // upper boundary valid
+    TEST_ASSERT_TRUE(pressSensorFault(4.95f));                  // shorted to 5 V (ADC saturated)
+}
+
+void test_situation_press_shorted_high_is_sensor_error(void) {
+    // Regression: a 5 V short read as 10 bar and raised OVERPRESSURE instead.
+    TEST_ASSERT_EQUAL(SIT_PRESS_SENSOR_ERR,
+                      evaluateSituation(100.0f, 4.95f, 80.0f, pressureFromVoltage(4.95f),
+                                        AlarmLatches{false, false, true}));
 }
 
 void test_temperatureFromResistance_known_point(void) {
@@ -336,6 +346,24 @@ void test_alert_levels(void) {
     TEST_ASSERT_EQUAL(ALERT_OFF,   situationAlert(SIT_COLD));
 }
 
+// ---------- displaySituation: status label follows the flap (70-110 C) ----------
+
+void test_display_label_follows_flap(void) {
+    // 90-91 C warming, flap still closed -> NORMAL (was "REGULATING FLAP:CLSD")
+    TEST_ASSERT_EQUAL(SIT_NORMAL, displaySituation(SIT_REGULATION, false));
+    TEST_ASSERT_EQUAL(SIT_REGULATION, displaySituation(SIT_REGULATION, true));
+    // 85-89 C cooling, flap still open -> REGULATING (was "NORMAL FLAP:OPEN")
+    TEST_ASSERT_EQUAL(SIT_REGULATION, displaySituation(SIT_NORMAL, true));
+    TEST_ASSERT_EQUAL(SIT_NORMAL, displaySituation(SIT_NORMAL, false));
+}
+
+void test_display_label_unchanged_outside_band(void) {
+    TEST_ASSERT_EQUAL(SIT_COLD, displaySituation(SIT_COLD, true));
+    TEST_ASSERT_EQUAL(SIT_MILD_OVERHEAT, displaySituation(SIT_MILD_OVERHEAT, false));
+    TEST_ASSERT_EQUAL(SIT_LOW_PRESSURE, displaySituation(SIT_LOW_PRESSURE, true));
+    TEST_ASSERT_EQUAL(SIT_OVERPRESSURE, displaySituation(SIT_OVERPRESSURE, false));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
 
@@ -368,6 +396,7 @@ int main(int, char**) {
     RUN_TEST(test_situation_temp_sensor_err);
     RUN_TEST(test_situation_cold_soak_is_not_sensor_error);
     RUN_TEST(test_situation_press_sensor_err);
+    RUN_TEST(test_situation_press_shorted_high_is_sensor_error);
     RUN_TEST(test_situation_stop_engine);
     RUN_TEST(test_situation_low_pressure);
     RUN_TEST(test_situation_overpressure);
@@ -395,6 +424,9 @@ int main(int, char**) {
     RUN_TEST(test_flap_hysteresis_holds_between);
 
     RUN_TEST(test_alert_levels);
+
+    RUN_TEST(test_display_label_follows_flap);
+    RUN_TEST(test_display_label_unchanged_outside_band);
 
     return UNITY_END();
 }

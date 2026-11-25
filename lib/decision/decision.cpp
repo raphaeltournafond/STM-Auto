@@ -30,7 +30,7 @@ bool tempSensorFault(float resistance) {
 }
 
 bool pressSensorFault(float vPressure) {
-    return vPressure < PRESS_MIN_SAFE_VOLTAGE;
+    return vPressure < PRESS_MIN_SAFE_VOLTAGE || vPressure > PRESS_MAX_SAFE_VOLTAGE;
 }
 
 float temperatureFromResistance(float resistance) {
@@ -128,6 +128,13 @@ bool nextFlapState(Situation sit, float temperature, bool prevFlapOpen) {
             if (prevFlapOpen && temperature <= FLAP_CLOSE_TEMP) return false;
             return prevFlapOpen;
     }
+}
+
+Situation displaySituation(Situation sit, bool flapOpen) {
+    if (sit == SIT_REGULATION || sit == SIT_NORMAL) {
+        return flapOpen ? SIT_REGULATION : SIT_NORMAL;
+    }
+    return sit;
 }
 
 AlertLevel situationAlert(Situation sit) {
