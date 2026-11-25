@@ -31,24 +31,29 @@ phases de vie, situations, seuils, sorties sur 4 canaux. Brochage : `src/pins.h`
   LED clignote lentement.
 - **INIT_FAIL** — **bloquant total**. LED : code dédié ; son : bip long ×N + voix défaut ;
   écran : code d'erreur + valeur brute (Ω / V).
-- **RUN** — nominal, régi par §3. **Watchdog** matériel si la boucle se fige.
+- **RUN** — nominal, régi par §3. **Watchdog** matériel (IWDG, 2 s, armé en fin d'INIT) si la
+  boucle se fige. Après un reset watchdog : redémarrage rapide directement en `RUN` (ni jingle,
+  ni animation, ni cycle volet, ni `INIT_FAIL` bloquant — `RUN` signale lui-même un défaut capteur).
 
 ## 3. Matrice de situations (RUN) — priorité décroissante, première vraie gagne
 
 | # | Situation | Température | Pression | Volet | Écran | LED | Son |
 |---|---|---|---|---|---|---|---|
-| 1 | Err. capteur temp | R > 1500 Ω (brut) | — | Ouvert séc. | `TEMP SENS ERR` + Ω brut | Rouge | Bips longs ×N + voix |
+| 1 | Err. capteur temp | R < 10 Ω ou ≥ 25 kΩ (brut) | — | Ouvert séc. | `TEMP SENS ERR` + Ω brut | Rouge | Bips longs ×N + voix |
 | 2 | Err. capteur press | — | V < 0,3 V (brut) | Ouvert séc. | `PRESS SENS ERR` + V brut | Rouge | Bips longs ×N + voix |
 | 3 | Stop engine | > 122 °C | < 1,2 bar | Ouvert 90° | `STOP ENGINE!` | Rouge | Buzzer continu + voix |
 | 4 | Chute pression | toute | < plancher §4 | Ouvert séc. | `LOW PRESS!` + bar | Rouge | Buzzer continu + voix |
-| 5 | Surpression | toute | > 6,5 bar | inchangé | `OVER PRESS` + bar | Rouge | Buzzer continu |
+| 5 | Surpression | toute | > 9,5 bar | inchangé | `OVER PRESS` + bar | Rouge | Buzzer continu |
 | 6 | Surchauffe légère | 110–122 °C | OK | Ouvert 90° | Temp. clignotante | Jaune | Buzzer intermittent + voix |
 | 7 | Régulation | 90–110 °C | OK | Ouvert 90° | Normal + `FLAP: OPEN` | Off | — |
 | 8 | Normal | 70–89 °C | OK | Fermé 0° | Normal | Off | — |
 | 9 | Moteur froid | < 70 °C | OK | Fermé 0° | Normal | Off | — |
 
 - Erreurs capteur en tête : mesure non fiable → rien n'est jugeable ; testées sur la grandeur
-  **brute** (Ω, V) avant conversion.
+  **brute** (Ω, V) avant conversion. La plage temp. valide est large pour le démarrage à froid
+  (≈ 18 kΩ à −20 °C ; circuit ouvert ≈ 72 kΩ ; court-circuit ≈ 0 Ω) et identique en `INIT` et
+  `RUN`. Sous 40 °C (fin de table, 925 Ω) la température affichée est plafonnée à 40 °C.
+- Mesures : moyenne de 16 échantillons ADC par lecture.
 - Volet **ouvert par défaut** en cas de doute/panne (privilégie le refroidissement).
 - Surpression : ouvrir le volet ne réduit pas la pression → alerte seule, volet inchangé.
 
@@ -72,11 +77,17 @@ sportive). Valeurs type ralenti.
 - **Volet (température)** : ouvre à **92 °C**, ferme à **85 °C**.
 - **Pression** : réarmement via la colonne dédiée §4 (repasser au-dessus du réarmement, pas
   seulement du critique).
+- **Surchauffe légère** (situation 6) : entre à **110 °C**, sort sous **108 °C**.
+- **Surpression** (situation 5) : entre au-dessus de **9,5 bar**, sort à **≤ 9,2 bar**.
+- **Confirmation** : une nouvelle situation doit être vue **3 cycles consécutifs** (~0,6 s) avant
+  de devenir active → le bruit capteur ne fait pas clignoter les alertes (voix rejouée, LED,
+  ack perdu).
 
 ## 6. Acquittement
 
 - **Bouton tactile** : acquitte l'alarme courante → coupe son + voix, **garde** écran + LED tant que
-  la condition persiste.
+  la condition persiste. Tant que l'ack tient, la voix d'une nouvelle situation de priorité
+  inférieure ou égale n'est pas jouée.
 - Une situation **nouvelle de priorité supérieure** repart en son malgré un ack précédent.
 - **Retour auto** au nominal dès que la condition disparaît.
 - **Multi-alarmes** : l'écran **alterne** entre les affichages.
@@ -111,6 +122,6 @@ USART1 = MP3, USART2 = console de débogage (`Serial` remappé via `build_flags`
 ## 9. Points ouverts
 
 - RPM via CAN (améliore la logique pression).
-- Seuil de surpression (6,5 bar) à confirmer ou situation 5 à abandonner.
+- Seuil de surpression (9,5 bar) à confirmer ou situation 5 à abandonner.
 - Liste / langue des messages vocaux.
 - Autres valeurs CAN à afficher (temp. eau, vitesse…).

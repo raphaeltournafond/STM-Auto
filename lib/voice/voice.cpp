@@ -11,6 +11,10 @@ int voiceTrack(Situation sit) {
     }
 }
 
+int voiceTrackOnEntry(Situation sit, bool acked) {
+    return acked ? 0 : voiceTrack(sit);
+}
+
 void dfplayerFrame(uint8_t cmd, uint16_t param, uint8_t* out) {
     out[0] = 0x7E;                      // start
     out[1] = 0xFF;                      // version

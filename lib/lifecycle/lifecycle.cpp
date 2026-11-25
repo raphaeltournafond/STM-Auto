@@ -1,11 +1,11 @@
 #include "lifecycle.h"
 
 bool tempSensorPlausible(float resistance) {
-    return resistance >= TEMP_PLAUSIBLE_MIN_RESISTANCE && resistance < TEMP_PLAUSIBLE_MAX_RESISTANCE;
+    return !tempSensorFault(resistance);
 }
 
 bool pressSensorPlausible(float vPressure) {
-    return vPressure >= PRESS_MIN_SAFE_VOLTAGE; // disconnected reads ~0 V
+    return !pressSensorFault(vPressure); // disconnected reads ~0 V
 }
 
 const char* initResultLabel(InitResult r) {

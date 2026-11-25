@@ -4,6 +4,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <SPI.h>
+#include <IWatchdog.h>
 #include "pins.h"      // pin map (single source of truth)
 #include "decision.h"  // hardware-independent decision logic (unit-tested)
 #include "ws2812.h"    // WS2812B pixel encoding (unit-tested)
@@ -28,6 +29,12 @@ const float VREF = 3.3f;
 const uint16_t ADC_MAX = 4095;
 const float TEMP_SERIES_RESISTOR = 220.0f; // temperature divider series resistor
 const float PRESS_DIVIDER_RATIO = 1.5f;    // 10/20 kOhm pressure divider
+const uint8_t ADC_SAMPLES = 16;            // averaged per reading (automotive noise)
+
+// ----- Hardware watchdog (DECISION_MATRIX §2) -----
+// Armed at the end of setup(); reloaded every 20 ms slice of the loop. If the
+// loop hangs (e.g. I2C lock-up) the MCU resets and monitoring resumes.
+const uint32_t WATCHDOG_TIMEOUT_US = 2000000; // 2 s
 
 // ----- FLAP Servos (twin, driven in tandem) -----
 const uint8_t FLAP_CLOSED = 0;  // servo angle
@@ -37,7 +44,8 @@ Servo flapServo2;
 
 // ----- Decision state (held here, evolved by the pure decision functions) -----
 bool flapOpen = false;      // current flap state (hysteresis), starts closed
-bool lowPressAlarm = false; // adaptive low-pressure alarm state (§4)
+AlarmLatches latches = {false, false, false}; // low-press / overheat / overpressure (§4/§5)
+SituationFilter sitFilter = {false, SIT_COLD, SIT_COLD, 0}; // debounced situation
 bool buzzerSounding = false; // current buzzer tone on/off (avoids retriggering tone())
 int prevSituation = -1;     // last dispatched situation (edge-triggered sound/voice)
 AckState ackState = {false, SIT_COLD}; // acknowledge state (§6)
@@ -199,8 +207,8 @@ void gaugeBootAnimation() {
     float temperature = temperatureFromResistance(resistance);
     float vPressure   = readPressureVoltage();
     float pressure    = pressureFromVoltage(vPressure);
-    const bool tErr = resistance >= TEMP_MAX_SAFE_RESISTANCE;
-    const bool pErr = vPressure  < PRESS_MIN_SAFE_VOLTAGE;
+    const bool tErr = tempSensorFault(resistance);
+    const bool pErr = pressSensorFault(vPressure);
     const int  tLen = ((int)temperature >= 100) ? 5 : 4;
     const int  pLen = (pressure >= 10.0f) ? 5 : 4;
     const int  tTgt = tErr ? 0 : (int)(constrain((temperature - 40.0f) / (150.0f - 40.0f), 0.0f, 1.0f) * 128.0f);
@@ -232,6 +240,15 @@ void gaugeBootAnimation() {
     }
 }
 
+void attachFlaps() {
+    flapServo1.attach(PIN_SERVO_FLAP_1);
+    flapServo2.attach(PIN_SERVO_FLAP_2);
+    flapServo1.write(FLAP_CLOSED);
+    flapServo2.write(FLAP_CLOSED);
+}
+
+void bootAndInit(); // full BOOT + INIT sequence, defined below
+
 void setup() {
     // ===== BOOT =====
     Serial.begin(115200);                 // debug on USART2 (build_flags)
@@ -243,6 +260,21 @@ void setup() {
     ws2812ShowAlert(ALERT_OFF);
     MP3Serial.begin(9600);                // DFPlayer Mini default baud
 
+    if (IWatchdog.isReset(true)) {
+        // The loop hung while running: get back to monitoring at once. Skip the
+        // jingle, animations, flap cycle and the blocking INIT_FAIL (RUN reports
+        // any sensor fault itself). The OLED + DFPlayer kept power, no wait needed.
+        Serial.println("Watchdog reset -> fast restart into RUN");
+        attachFlaps();
+        OLED_I2C.begin();
+        oledOk = display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS);
+    } else {
+        bootAndInit();
+    }
+    IWatchdog.begin(WATCHDOG_TIMEOUT_US); // armed only once INIT (which may block) is done
+}
+
+void bootAndInit() {
     delay(500); // let the screen + DFPlayer power up
 
     // C major arpeggio (C5-E5-G5-C6) synced with LED blink
@@ -258,10 +290,7 @@ void setup() {
         digitalWrite(PIN_STATUS_LED, HIGH); delay(80);
     }
     // Servos parked before INIT so flaps stay controlled through any blocking check.
-    flapServo1.attach(PIN_SERVO_FLAP_1);
-    flapServo2.attach(PIN_SERVO_FLAP_2);
-    flapServo1.write(FLAP_CLOSED);
-    flapServo2.write(FLAP_CLOSED);
+    attachFlaps();
     dfplayerSend(DF_CMD_SET_VOLUME, MP3_VOLUME); // before INIT so fail voice is at the right level
 
     // ===== INIT =====
@@ -293,7 +322,9 @@ void setup() {
 // ========== HARDWARE SENSOR READS ==========
 
 float readPinVoltage(uint8_t pin) {
-    return analogRead(pin) * (VREF / ADC_MAX);
+    uint32_t sum = 0;
+    for (uint8_t i = 0; i < ADC_SAMPLES; i++) sum += analogRead(pin);
+    return ((float)sum / ADC_SAMPLES) * (VREF / ADC_MAX);
 }
 
 float readTemperatureResistance() {
@@ -335,11 +366,13 @@ void applyBuzzer(Situation sit, bool muted) {
 }
 
 // ----- VOICE (edge-triggered) -----
-// Play the situation's voice prompt (§7) once when it becomes active.
+// Play the situation's voice prompt (§7) once when it becomes active, unless the
+// alert channel is acknowledged (§6). Call after updateAck() so a higher-priority
+// alert has already re-armed it.
 void onSituationChange(Situation sit) {
     Serial.print("Situation -> ");
     Serial.println(situationName(sit));
-    playVoice(voiceTrack(sit));
+    playVoice(voiceTrackOnEntry(sit, ackState.acked));
 }
 
 // ----- DISPLAY -----
@@ -348,8 +381,8 @@ void updateDisplay(Situation sit, float temperature, float resistance, float pre
     display.clearDisplay();
     display.setTextWrap(false);
 
-    const bool tempErr  = resistance >= TEMP_MAX_SAFE_RESISTANCE;
-    const bool pressErr = vPressure < PRESS_MIN_SAFE_VOLTAGE;
+    const bool tempErr  = tempSensorFault(resistance);
+    const bool pressErr = pressSensorFault(vPressure);
 
     // Yellow zone (y=0-15): situation label; alerts invert the strip for visibility.
     const bool isAlert = situationAlert(sit) != ALERT_OFF;
@@ -434,17 +467,20 @@ void onAckPress() {
 // ========== MAIN LOOP ==========
 
 void loop() {
+    IWatchdog.reload();
+
     // ----- SENSOR Reads + conversions -----
     float resistance = readTemperatureResistance();
     float temperature = temperatureFromResistance(resistance);
     float vPressure = readPressureVoltage();
     float pressure = pressureFromVoltage(vPressure);
 
-    // ----- DECISION (§3/§4) -----
-    bool sensorsOk = (resistance < TEMP_MAX_SAFE_RESISTANCE) && (vPressure >= PRESS_MIN_SAFE_VOLTAGE);
-    lowPressAlarm = sensorsOk ? nextLowPressAlarm(lowPressAlarm, temperature, pressure)
-                              : false; // readings unreliable -> drop the adaptive alarm
-    Situation sit = evaluateSituation(resistance, vPressure, temperature, pressure, lowPressAlarm);
+    // ----- DECISION (§3/§4/§5) -----
+    const bool sensorsOk = !tempSensorFault(resistance) && !pressSensorFault(vPressure);
+    latches = nextAlarmLatches(latches, sensorsOk, temperature, pressure);
+    const Situation rawSit = evaluateSituation(resistance, vPressure, temperature, pressure, latches);
+    sitFilter = nextSituationFilter(sitFilter, rawSit, SITUATION_CONFIRM_TICKS);
+    const Situation sit = sitFilter.stable; // debounced: drives every output below
 
     // ----- ACKNOWLEDGE (§6) -----
     bool ackNow = digitalRead(PIN_ACK_BUTTON);
@@ -470,6 +506,7 @@ void loop() {
     // Split the 200 ms wait into 20 ms slices so short ACK taps are never missed.
     for (uint8_t i = 0; i < 10; i++) {
         delay(20);
+        IWatchdog.reload();
         bool ackNow = digitalRead(PIN_ACK_BUTTON);
         if (ackNow && !prevAckButton) {
             ackState = updateAck(ackState, sit, true);

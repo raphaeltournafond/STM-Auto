@@ -30,8 +30,10 @@ Pure logic lives in `lib/` (Arduino-free, unit-tested); `src/main.cpp` owns hard
 and calls into it:
 
 - **`lib/decision/decision.{h,cpp}`** — `evaluateSituation()` (priority matrix §3), `nextFlapState()`
-  (§5 hysteresis), `nextLowPressAlarm()` (§4), `temperatureBand()`, `situationAlert()`,
-  `interpolate()` and the sensor scale tables. All pure functions taking state as parameters.
+  (§5 hysteresis), `nextAlarmLatches()` (§4 low-press + §5 overheat/overpressure latches),
+  `nextSituationFilter()` (3-tick debounce), `tempSensorFault()`/`pressSensorFault()`,
+  `temperatureBand()`, `situationAlert()`, `interpolate()` and the sensor scale tables. All pure
+  functions taking state as parameters.
 - **`lib/ws2812/ws2812.{h,cpp}`** — `alertColor()` and `encodePixelGRB()` (one WS2812B pixel → 9 SPI
   bytes, 3 SPI bits per WS bit). Pure; the SPI2 transmit lives in `main.cpp` (`ws2812Send()`).
 - **`lib/buzzer/buzzer.{h,cpp}`** — `buzzerPattern()` (situation → §3 sound pattern) and `buzzerOnAt()`
@@ -53,7 +55,7 @@ and calls into it:
   muted when acknowledged), `onSituationChange()` (edge-triggered MP3 voice via USART1), and
   `updateDisplay()` throttled to 500 ms with `OLED_I2C.begin()` before each frame (STM32F103 I2C
   BUSY-flag errata). The 200 ms wait is split into 10 × 20 ms polls so ACK taps are never missed.
-  `main.cpp` holds the evolving state (`flapOpen`, `lowPressAlarm`, `buzzerSounding`, `ackState`,
+  `main.cpp` holds the evolving state (`flapOpen`, `latches`, `sitFilter`, `buzzerSounding`, `ackState`,
   `prevSituation`).
 - **Tests**: `test/test_*/` (Unity) run via `pio test -e native` against `lib/` — the `native` env
   excludes `src/` so no hardware/toolchain is needed.
@@ -64,8 +66,12 @@ and calls into it:
 - Interpolation x-tables (`resTable`, `vPressureTable` in `lib/decision/decision.cpp`) **must stay
   strictly increasing**, each in sync with its y-table (`tempTable`, `barTable`) — `interpolate()`
   assumes it.
-- Keep the sensor fail-safes: resistance ≥ `TEMP_MAX_SAFE_RESISTANCE` → `TEMPERATURE ERROR`;
-  pressure volt < `PRESS_MIN_SAFE_VOLTAGE` → `PRESSURE ERROR`.
+- Keep the sensor fail-safes via `tempSensorFault()` / `pressSensorFault()`: resistance outside
+  [`TEMP_MIN_SAFE_RESISTANCE`, `TEMP_MAX_SAFE_RESISTANCE`) → `TEMPERATURE ERROR`; pressure volt
+  < `PRESS_MIN_SAFE_VOLTAGE` → `PRESSURE ERROR`. INIT plausibility reuses the same window — keep
+  it wide enough for a cold-soak start (~18 kΩ at −20 °C).
+- `loop()` must call `IWatchdog.reload()` at least every 2 s (it does every 20 ms slice); any new
+  blocking code in RUN must reload too.
 
 ## Pins (`src/pins.h` is the source of truth)
 

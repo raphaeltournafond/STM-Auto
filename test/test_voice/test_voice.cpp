@@ -24,6 +24,14 @@ void test_voice_no_track_for_silent_situations(void) {
     TEST_ASSERT_EQUAL_INT(0, voiceTrack(SIT_COLD));
 }
 
+void test_voice_muted_when_acknowledged(void) {
+    // §6: ack mutes voice too (e.g. acked STOP_ENGINE dropping to LOW_PRESSURE)
+    TEST_ASSERT_EQUAL_INT(0, voiceTrackOnEntry(SIT_LOW_PRESSURE, true));
+    TEST_ASSERT_EQUAL_INT(0, voiceTrackOnEntry(SIT_MILD_OVERHEAT, true));
+    TEST_ASSERT_EQUAL_INT(3, voiceTrackOnEntry(SIT_LOW_PRESSURE, false));
+    TEST_ASSERT_EQUAL_INT(4, voiceTrackOnEntry(SIT_STOP_ENGINE, false));
+}
+
 // ---------- DFPlayer frame builder ----------
 
 void test_frame_play_track_1(void) {
@@ -57,6 +65,7 @@ int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_voice_track_mapping);
     RUN_TEST(test_voice_no_track_for_silent_situations);
+    RUN_TEST(test_voice_muted_when_acknowledged);
     RUN_TEST(test_frame_play_track_1);
     RUN_TEST(test_frame_set_volume_30);
     RUN_TEST(test_frame_markers_and_checksum);
