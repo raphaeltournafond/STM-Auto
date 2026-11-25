@@ -50,4 +50,13 @@ jobs:
       - name: Install PlatformIO
         run: pip install --upgrade platformio
       - name: Build firmware
-        run: pio run -e bluepill_f103c8
+        run: pio run -e bluepill_f103c8 | tee build.log
+      - name: Report flash / RAM usage
+        run: |
+          {
+            echo "### Firmware size (bluepill_f103c8)"
+            echo '```'
+            grep -E '^(RAM|Flash):' build.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          grep -E '^(RAM|Flash):' build.log

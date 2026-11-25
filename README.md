@@ -23,8 +23,12 @@ pressure floors, hysteresis, acknowledgement and voice messages) lives in
   temperature band.
 - **Fail-safes** — flap defaults open on any doubt; sensor faults are detected on the raw signal
   (resistance / voltage) before conversion.
-- **Status display** — temperature, pressure, flap state and alert banner on the OLED, plus an
-  onboard backup alert LED.
+- **Status display** — temperature, pressure, flap state and alert banner on the OLED (alternating
+  between simultaneous alarms, raw Ω / V on a sensor fault), plus an onboard backup alert LED.
+- **Self-recovering** — hardware watchdog from power-on; a failed start-up self-test never blocks
+  monitoring for more than 10 s.
+- **Telemetry** — a CSV line (`T,…`) every 500 ms on the debug serial for bench calibration and
+  in-car logging.
 - **Tested** — pure decision logic is unit-tested on the host and gated by CI.
 
 ## Hardware
@@ -59,22 +63,29 @@ pio test -e native                    # run unit tests on the host (no hardware)
 pio run -t clean                      # clean
 ```
 
-Library dependencies (auto-installed): Adafruit SSD1306 + Adafruit GFX (firmware), Unity (tests).
+Library dependencies (auto-installed, pinned in `platformio.ini`): Adafruit SSD1306 + GFX + BusIO
+(firmware), Unity (tests).
+
+`pio test -e native` needs a host C/C++ compiler (gcc). On Windows without one, run
+`scripts\test-native-msvc.cmd` instead: it builds and runs the same suites with MSVC (Visual Studio
+Build Tools, C++ workload; run `pio pkg install -e native` once to fetch Unity).
 
 ## Architecture
 
 - **`lib/`** — **pure, Arduino-free** logic: `decision/` (situation matrix, hysteresis, interpolation,
   sensor conversions), `ws2812/` (WS2812B pixel → SPI byte encoding), `buzzer/` (alert patterns +
-  envelope), `ack/` (acknowledge state machine), `voice/` (MP3 mapping + DFPlayer frames), and
-  `lifecycle/` (INIT self-test helpers). State is passed in as parameters, so it builds and runs
-  natively and is fully unit-testable.
+  envelope), `ack/` (acknowledge state machine), `voice/` (MP3 mapping + DFPlayer frames + reply
+  parser), `lifecycle/` (INIT self-test helpers), `gauge/` (gauge scales), `screen/` (alarm
+  alternation, layout, raw-value formatting) and `run/` (the whole RUN decision tick). State is
+  passed in as parameters, so it builds and runs natively and is fully unit-testable.
 - **`src/main.cpp`** — owns all hardware I/O (servos, OLED, ADC, LEDs, SPI, serial) and the evolving
-  state, calling into `lib/` each 200 ms loop.
+  state, sampling the sensors across each ~200 ms loop and calling `runTick()`.
 
 ```
 src/            firmware (main.cpp, pins.h)
-lib/            pure libraries (decision, ws2812) — unit-tested
+lib/            pure libraries — unit-tested
 test/           Unity test suites (native)
+scripts/        helper scripts (MSVC test runner for Windows)
 sounds/         MP3 voice prompts for the DFPlayer SD card (§7)
 kicad/stm-auto/ schematic, PCB, wiring notes
 ```
@@ -88,15 +99,16 @@ pio test -e native
 ```
 
 [GitHub Actions](.github/workflows/ci.yml) runs the unit tests and the firmware build on every pull
-request and on pushes to `main`.
+request and on pushes to `main`, and reports flash / RAM usage in the job summary.
 
 ## Status
 
-**Implemented:** `BOOT→INIT→RUN` life phases with blocking self-tests (§2), temperature + pressure
+**Implemented:** `BOOT→INIT→RUN` life phases with self-tests incl. the MP3 SD card (§2), watchdog,
+temperature + pressure
 reading, twin-servo thermal regulation with hysteresis, the full situation decision matrix with
 adaptive low-pressure floor, OLED status display, WS2812B RGB alert indicator (off/yellow/red) with
-onboard backup LED, buzzer alert patterns, ACK touch button (mutes sound, §6), MP3 voice prompts (§7),
-native tests + CI.
+onboard backup LED, buzzer alert patterns, ACK touch button (mutes sound, §6), multi-alarm display
+alternation, MP3 voice prompts (§7), serial telemetry, native tests + CI.
 
 **Wired but not yet coded** (pins assigned, schematic complete): CAN / engine-RPM input. See
 `DECISION_MATRIX.md` for the roadmap.

@@ -92,6 +92,21 @@ Situation evaluateSituation(float resistance, float vPressure, float temperature
     return SIT_COLD;
 }
 
+uint16_t activeAlertMask(float resistance, float vPressure, float temperature,
+                         float pressure, AlarmLatches latches) {
+    const bool tErr = tempSensorFault(resistance);
+    const bool pErr = pressSensorFault(vPressure);
+    uint16_t m = 0;
+    if (tErr) m |= 1u << SIT_TEMP_SENSOR_ERR;
+    if (pErr) m |= 1u << SIT_PRESS_SENSOR_ERR;
+    if (tErr || pErr) return m; // readings unreliable: nothing else is judgeable
+    if (temperature > TEMP_STOP_ENGINE && pressure < PRESS_STOP_ENGINE) m |= 1u << SIT_STOP_ENGINE;
+    if (latches.lowPress)     m |= 1u << SIT_LOW_PRESSURE;
+    if (latches.overpressure) m |= 1u << SIT_OVERPRESSURE;
+    if (latches.overheat)     m |= 1u << SIT_MILD_OVERHEAT;
+    return m;
+}
+
 SituationFilter nextSituationFilter(SituationFilter prev, Situation raw, uint8_t confirmTicks) {
     SituationFilter f = prev;
     if (!f.primed) return {true, raw, raw, 0};  // first tick: take the reading as-is

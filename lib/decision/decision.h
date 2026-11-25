@@ -96,6 +96,12 @@ AlarmLatches nextAlarmLatches(AlarmLatches prev, bool sensorsOk,
 Situation evaluateSituation(float resistance, float vPressure, float temperature,
                             float pressure, AlarmLatches latches);
 
+// Every alert situation (situationAlert != ALERT_OFF) currently true, as a bit
+// mask of (1u << Situation). evaluateSituation() keeps only the highest one; the
+// display uses the full mask to alternate between simultaneous alarms (§6).
+uint16_t activeAlertMask(float resistance, float vPressure, float temperature,
+                         float pressure, AlarmLatches latches);
+
 // Debounce the raw situation: returns the next filter state; use .stable.
 SituationFilter nextSituationFilter(SituationFilter prev, Situation raw, uint8_t confirmTicks);
 

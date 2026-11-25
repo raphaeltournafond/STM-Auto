@@ -364,6 +364,41 @@ void test_display_label_unchanged_outside_band(void) {
     TEST_ASSERT_EQUAL(SIT_OVERPRESSURE, displaySituation(SIT_OVERPRESSURE, false));
 }
 
+// ---------- activeAlertMask (multi-alarm display, §6) ----------
+
+void test_alert_mask_lists_every_active_alarm(void) {
+    const float R_OK = 120.0f, V_OK = 2.0f;
+    TEST_ASSERT_EQUAL_UINT16(0, activeAlertMask(R_OK, V_OK, 100.0f, 3.0f, L_NONE));
+    uint16_t m = activeAlertMask(R_OK, V_OK, 125.0f, 1.0f, L_ALL);
+    TEST_ASSERT_EQUAL_UINT16((1u << SIT_STOP_ENGINE) | (1u << SIT_LOW_PRESSURE) |
+                             (1u << SIT_OVERPRESSURE) | (1u << SIT_MILD_OVERHEAT), m);
+}
+
+void test_alert_mask_sensor_errors_exclude_the_rest(void) {
+    uint16_t m = activeAlertMask(TEMP_MAX_SAFE_RESISTANCE, 0.1f, 150.0f, 0.0f, L_ALL);
+    TEST_ASSERT_EQUAL_UINT16((1u << SIT_TEMP_SENSOR_ERR) | (1u << SIT_PRESS_SENSOR_ERR), m);
+}
+
+void test_alert_mask_top_bit_matches_evaluate_situation(void) {
+    // The highest-priority alert in the mask is the situation the matrix picks.
+    const float rs[] = {0.0f, 120.0f, 68.0f, 50.0f};
+    const float vs[] = {0.1f, 1.0f, 2.0f, 4.9f};
+    const float ts[] = {60.0f, 100.0f, 115.0f, 125.0f};
+    const float ps[] = {0.5f, 1.0f, 3.0f, 9.8f};
+    const AlarmLatches ls[] = {L_NONE, L_LOWPRESS, L_OVERHEAT, L_OVERPRESS, L_ALL};
+    for (float r : rs) for (float v : vs) for (float t : ts) for (float p : ps) for (const AlarmLatches& l : ls) {
+        Situation sit = evaluateSituation(r, v, t, p, l);
+        uint16_t m = activeAlertMask(r, v, t, p, l);
+        if (situationAlert(sit) == ALERT_OFF) {
+            TEST_ASSERT_EQUAL_UINT16(0, m);
+        } else {
+            uint8_t top = 0;
+            while (!(m & (1u << top))) top++;
+            TEST_ASSERT_EQUAL_INT(sit, top);
+        }
+    }
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
 
@@ -427,6 +462,9 @@ int main(int, char**) {
 
     RUN_TEST(test_display_label_follows_flap);
     RUN_TEST(test_display_label_unchanged_outside_band);
+    RUN_TEST(test_alert_mask_lists_every_active_alarm);
+    RUN_TEST(test_alert_mask_sensor_errors_exclude_the_rest);
+    RUN_TEST(test_alert_mask_top_bit_matches_evaluate_situation);
 
     return UNITY_END();
 }
