@@ -23,6 +23,9 @@ pio run -t clean                      # clean
 ```
 
 Libs (`platformio.ini`): Adafruit SSD1306 + GFX (firmware); Unity (native tests, auto-installed).
+Platform: `platformio/ststm32 @ ~20.0.0` = **STM32duino core 3.x** (ArduinoCore-API based). In core 3
+`arduino::HardwareSerial` is an abstract base — instantiate extra UARTs as `Uart` (e.g.
+`Uart MP3Serial(rx, tx)`); `SPISettings`/`HardwareSPI`/`HardwareI2C` come from ArduinoCore-API.
 
 ## Architecture
 
@@ -85,8 +88,8 @@ and calls into it:
 | Debug Serial (USART2) | `PA2`/`PA3` | | |
 
 Notes: `Servo` lib owns **TIM2**, `tone()` owns **TIM3** (shared timers — don't reuse them for PWM).
-USART1 = MP3, USART2 = debug `Serial` (remapped via `build_flags` in `platformio.ini`, since the
-variant defaults `Serial` to USART1). CAN uses the USB pins → remove the PA12 USB pull-up. WS2812B
+USART1 = MP3 (`Uart MP3Serial`), USART2 = debug `Serial` (the core aliases it to `Serial2`; remapped
+via `build_flags` in `platformio.ini`, since the variant defaults `Serial` to USART1). CAN uses the USB pins → remove the PA12 USB pull-up. WS2812B
 needs a level shifter (or ~4.3V supply).
 
 `main.cpp` includes `pins.h` and uses these macros directly — change a pin in `pins.h` only.
