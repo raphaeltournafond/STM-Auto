@@ -25,8 +25,16 @@ float interpolate(float x, const float* xTable, const float* yTable, uint8_t siz
     return yTable[size - 1]; // fallback
 }
 
+bool tempSensorFault(float resistance) {
+    return resistance < TEMP_MIN_SAFE_RESISTANCE || resistance >= TEMP_MAX_SAFE_RESISTANCE;
+}
+
+bool pressSensorFault(float vPressure) {
+    return vPressure < PRESS_MIN_SAFE_VOLTAGE;
+}
+
 float temperatureFromResistance(float resistance) {
-    if (resistance >= TEMP_MAX_SAFE_RESISTANCE) return tempTable[0]; // max temp for safety
+    if (tempSensorFault(resistance)) return tempTable[0]; // max temp for safety
     return interpolate(resistance, resTable, tempTable, tempTableSize);
 }
 
@@ -49,17 +57,60 @@ bool nextLowPressAlarm(bool prev, float temperature, float pressure) {
     return prev;
 }
 
+bool nextOverheat(bool prev, float temperature) {
+    if (!prev && temperature >= TEMP_OVERHEAT)      return true;
+    if (prev && temperature < TEMP_OVERHEAT_CLEAR)  return false;
+    return prev;
+}
+
+bool nextOverpressure(bool prev, float pressure) {
+    if (!prev && pressure > PRESS_OVER)        return true;
+    if (prev && pressure <= PRESS_OVER_CLEAR)  return false;
+    return prev;
+}
+
+AlarmLatches nextAlarmLatches(AlarmLatches prev, bool sensorsOk,
+                              float temperature, float pressure) {
+    if (!sensorsOk) return {false, false, false};
+    return {
+        nextLowPressAlarm(prev.lowPress, temperature, pressure),
+        nextOverheat(prev.overheat, temperature),
+        nextOverpressure(prev.overpressure, pressure),
+    };
+}
+
 Situation evaluateSituation(float resistance, float vPressure, float temperature,
-                            float pressure, bool lowPressAlarm) {
-    if (resistance >= TEMP_MAX_SAFE_RESISTANCE)                          return SIT_TEMP_SENSOR_ERR;
-    if (vPressure < PRESS_MIN_SAFE_VOLTAGE)                              return SIT_PRESS_SENSOR_ERR;
+                            float pressure, AlarmLatches latches) {
+    if (tempSensorFault(resistance))                                    return SIT_TEMP_SENSOR_ERR;
+    if (pressSensorFault(vPressure))                                    return SIT_PRESS_SENSOR_ERR;
     if (temperature > TEMP_STOP_ENGINE && pressure < PRESS_STOP_ENGINE) return SIT_STOP_ENGINE;
-    if (lowPressAlarm)                                                  return SIT_LOW_PRESSURE;
-    if (pressure > PRESS_OVER)                                          return SIT_OVERPRESSURE;
-    if (temperature >= TEMP_OVERHEAT)                                   return SIT_MILD_OVERHEAT;
+    if (latches.lowPress)                                               return SIT_LOW_PRESSURE;
+    if (latches.overpressure)                                           return SIT_OVERPRESSURE;
+    if (latches.overheat)                                               return SIT_MILD_OVERHEAT;
     if (temperature >= TEMP_REGULATION)                                 return SIT_REGULATION;
     if (temperature >= TEMP_NORMAL)                                     return SIT_NORMAL;
     return SIT_COLD;
+}
+
+SituationFilter nextSituationFilter(SituationFilter prev, Situation raw, uint8_t confirmTicks) {
+    SituationFilter f = prev;
+    if (!f.primed) return {true, raw, raw, 0};  // first tick: take the reading as-is
+    if (raw == f.stable) {                      // back to (or still in) the active one
+        f.candidate = raw;
+        f.count = 0;
+        return f;
+    }
+    if (raw != f.candidate) {                   // a different change starts over
+        f.candidate = raw;
+        f.count = 1;
+    } else if (f.count < 255) {
+        f.count++;
+    }
+    if (f.count >= confirmTicks) {              // confirmed -> becomes active
+        f.stable = raw;
+        f.count = 0;
+    }
+    return f;
 }
 
 bool nextFlapState(Situation sit, float temperature, bool prevFlapOpen) {

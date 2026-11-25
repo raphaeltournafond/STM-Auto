@@ -16,5 +16,9 @@ constexpr uint8_t DF_CMD_STOP       = 0x16; // stop playback
 // (track 1 is the "system ready" jingle, played by the INIT phase — not here.)
 int voiceTrack(Situation sit);
 
+// Track to play when `sit` becomes the active situation: its voiceTrack(), or 0
+// while the alert channel is acknowledged (§6: ack mutes sound + voice).
+int voiceTrackOnEntry(Situation sit, bool acked);
+
 // Build a DFPlayer Mini command frame (10 bytes incl. checksum) into out[10].
 void dfplayerFrame(uint8_t cmd, uint16_t param, uint8_t* out);

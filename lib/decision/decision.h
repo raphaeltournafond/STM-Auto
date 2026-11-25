@@ -7,7 +7,7 @@
 
 // Situations by priority (top = highest); first true wins (§3).
 enum Situation {
-    SIT_TEMP_SENSOR_ERR,  // 1  R > TEMP_MAX_SAFE_RESISTANCE
+    SIT_TEMP_SENSOR_ERR,  // 1  R outside [TEMP_MIN_SAFE_RESISTANCE, TEMP_MAX_SAFE_RESISTANCE)
     SIT_PRESS_SENSOR_ERR, // 2  V < PRESS_MIN_SAFE_VOLTAGE
     SIT_STOP_ENGINE,      // 3  too hot AND too low pressure
     SIT_LOW_PRESSURE,     // 4  pressure below adaptive floor (§4)
@@ -22,8 +22,12 @@ enum Situation {
 enum AlertLevel { ALERT_OFF, ALERT_WARN, ALERT_ALARM }; // off / yellow / red
 
 // ----- Thresholds -----
-constexpr float TEMP_MAX_SAFE_RESISTANCE = 1500.0f; // above -> temp sensor fault
-constexpr float PRESS_MIN_SAFE_VOLTAGE   = 0.3f;    // below -> pressure sensor fault
+// Temp sensor fault window on the raw resistance. Must stay wide enough for a
+// cold-soak start: the NTC reads ~18 kΩ at -20 °C, open circuit reads ~72 kΩ,
+// and the scale table bottoms out at 925 Ω = 40 °C (colder reads as 40 °C).
+constexpr float TEMP_MAX_SAFE_RESISTANCE = 25000.0f; // at/above -> open / disconnected
+constexpr float TEMP_MIN_SAFE_RESISTANCE = 10.0f;    // below -> shorted to GND (150 °C = 32 Ω)
+constexpr float PRESS_MIN_SAFE_VOLTAGE   = 0.3f;     // below -> pressure sensor fault
 constexpr float FLAP_OPEN_TEMP  = 92.0f;            // flap hysteresis open (§5)
 constexpr float FLAP_CLOSE_TEMP = 85.0f;            // flap hysteresis close (§5)
 constexpr float TEMP_STOP_ENGINE = 122.0f;          // with low pressure -> stop engine
@@ -33,7 +37,35 @@ constexpr float TEMP_NORMAL      = 70.0f;           // normal band start
 constexpr float PRESS_STOP_ENGINE = 1.2f;           // stop-engine pressure
 constexpr float PRESS_OVER        = 6.5f;           // overpressure ceiling
 
+// ----- Alert hysteresis (§5): enter at the threshold, clear only past these -----
+constexpr float TEMP_OVERHEAT_CLEAR = 108.0f;       // mild overheat clears below
+constexpr float PRESS_OVER_CLEAR    = 6.2f;         // overpressure clears at/below
+
+// A new situation must be seen on this many consecutive loop ticks (~200 ms
+// each) before it replaces the active one, so sensor noise cannot flicker
+// alerts (voice replays, LED toggles, lost acknowledgements).
+constexpr uint8_t SITUATION_CONFIRM_TICKS = 3;
+
+// Latched alert states with hysteresis, evolved once per loop tick.
+struct AlarmLatches {
+    bool lowPress;     // adaptive low-pressure floor (§4)
+    bool overheat;     // mild overheat band (110 °C, clears < 108 °C)
+    bool overpressure; // overpressure (> 6.5 bar, clears <= 6.2 bar)
+};
+
+// Debounce state for the active situation (see SITUATION_CONFIRM_TICKS).
+struct SituationFilter {
+    bool primed;          // false until the first tick (first reading is taken as-is)
+    Situation stable;     // confirmed situation, drives all outputs
+    Situation candidate;  // raw situation currently being confirmed
+    uint8_t count;        // consecutive ticks the candidate has been seen
+};
+
 // ----- Pure helpers -----
+
+// Raw sensor fault checks (tested on the raw Ω / V before conversion, §3).
+bool tempSensorFault(float resistance);  // shorted or open
+bool pressSensorFault(float vPressure);  // disconnected
 
 // Piecewise-linear lookup; xTable must be strictly increasing, same size as yTable.
 float interpolate(float x, const float* xTable, const float* yTable, uint8_t size);
@@ -48,9 +80,21 @@ uint8_t temperatureBand(float temperature);
 // Adaptive low-pressure alarm with per-band hysteresis (§4); returns next state.
 bool nextLowPressAlarm(bool prev, float temperature, float pressure);
 
-// Priority-ordered situation evaluation (§3). lowPressAlarm is the §4 state.
+// Mild-overheat / overpressure latches with hysteresis (§5); return next state.
+bool nextOverheat(bool prev, float temperature);
+bool nextOverpressure(bool prev, float pressure);
+
+// Evolve all latches for one tick. When a sensor is faulty its readings are
+// unreliable, so every latch drops (the sensor-error situation takes over).
+AlarmLatches nextAlarmLatches(AlarmLatches prev, bool sensorsOk,
+                              float temperature, float pressure);
+
+// Priority-ordered situation evaluation (§3), using the latched alert states.
 Situation evaluateSituation(float resistance, float vPressure, float temperature,
-                            float pressure, bool lowPressAlarm);
+                            float pressure, AlarmLatches latches);
+
+// Debounce the raw situation: returns the next filter state; use .stable.
+SituationFilter nextSituationFilter(SituationFilter prev, Situation raw, uint8_t confirmTicks);
 
 // Next flap state: safety situations force open, overpressure holds, normal bands
 // use temperature hysteresis (§5); returns true = open.

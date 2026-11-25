@@ -2,12 +2,11 @@
 #include <stdint.h>
 #include "decision.h" // reuses PRESS_MIN_SAFE_VOLTAGE
 
-// INIT-only plausibility bounds for the temperature sensor.
-// These are wider than the runtime TEMP_MAX_SAFE_RESISTANCE (1500 Ω) to accommodate
-// cold-soak starts: at -20 °C the NTC reads ~18 kΩ; open circuit reads ~72 kΩ.
-// Lower bound catches a dead short to GND (0 Ω); table minimum at 150 °C is 32 Ω.
-constexpr float TEMP_PLAUSIBLE_MIN_RESISTANCE = 10.0f;   // below -> shorted sensor
-constexpr float TEMP_PLAUSIBLE_MAX_RESISTANCE = 25000.0f; // above -> open / disconnected
+// INIT plausibility bounds for the temperature sensor: the same window as the
+// runtime fault check (decision.h), so a sensor that passes INIT can never be
+// flagged faulty by RUN at the same temperature (e.g. on a cold-soak start).
+constexpr float TEMP_PLAUSIBLE_MIN_RESISTANCE = TEMP_MIN_SAFE_RESISTANCE; // below -> shorted
+constexpr float TEMP_PLAUSIBLE_MAX_RESISTANCE = TEMP_MAX_SAFE_RESISTANCE; // at/above -> open
 
 // Startup life phases (DECISION_MATRIX §2): BOOT -> INIT -> RUN, with a blocking
 // INIT_FAIL from INIT. Phases run once at boot in setup(); RUN is the loop().
