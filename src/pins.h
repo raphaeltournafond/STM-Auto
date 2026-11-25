@@ -40,13 +40,16 @@
 #define PIN_ACK_BUTTON    PB5   // acknowledge; plain INPUT (module drives it), rising edge
 
 // STATUS
-#define PIN_WS2812_DATA   PB15  // RGB LED via SPI2 MOSI + DMA; level-shift to 5V (or supply ~4.3V)
+#define PIN_WS2812_DATA   PB15  // RGB LED via SPI2 MOSI (blocking 9-byte transfer); level-shift to 5V (or supply ~4.3V)
+#define PIN_WS2812_SPI_MISO PB14 // SPI2 MISO — claimed by the SPI2 peripheral, leave unconnected
+#define PIN_WS2812_SPI_SCLK PB13 // SPI2 SCK  — claimed by the SPI2 peripheral, leave unconnected
 #define PIN_STATUS_LED    PC13  // onboard LED (active LOW), backup indicator
 
 // CAN BUS — SN65HVD230 @ 3.3V. PA11/PA12 are the USB pins: no USB, remove PA12 USB pull-up.
 #define PIN_CAN_RX        PA11
 #define PIN_CAN_TX        PA12
 
-// Free for future use: PA4/PA5/PA8, PB0/PB1, PB7-PB9, PB12-PB14.
+// Free for future use: PA4/PA5/PA8, PB0/PB1, PB7-PB9, PB12.
+// Reserved (not free): PB13/PB14 belong to SPI2 for the WS2812 (see above).
 
 #endif // PINS_H

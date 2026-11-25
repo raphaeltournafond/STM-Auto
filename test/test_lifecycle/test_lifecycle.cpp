@@ -24,6 +24,7 @@ void test_press_sensor_plausible(void) {
     TEST_ASSERT_TRUE(pressSensorPlausible(2.0f));
     TEST_ASSERT_TRUE(pressSensorPlausible(PRESS_MIN_SAFE_VOLTAGE));      // boundary is inclusive
     TEST_ASSERT_FALSE(pressSensorPlausible(0.1f));                       // disconnected ~0 V
+    TEST_ASSERT_FALSE(pressSensorPlausible(4.95f));                      // shorted to 5 V
 }
 
 void test_init_fail_voice_track(void) {

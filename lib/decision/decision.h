@@ -27,7 +27,10 @@ enum AlertLevel { ALERT_OFF, ALERT_WARN, ALERT_ALARM }; // off / yellow / red
 // and the scale table bottoms out at 925 Ω = 40 °C (colder reads as 40 °C).
 constexpr float TEMP_MAX_SAFE_RESISTANCE    = 25000.0f; // at/above -> open / disconnected
 constexpr float TEMP_MIN_SAFE_RESISTANCE    = 10.0f;    // below -> shorted to GND (150 °C = 32 Ω)
-constexpr float PRESS_MIN_SAFE_VOLTAGE      = 0.3f;     // below -> pressure sensor fault
+constexpr float PRESS_MIN_SAFE_VOLTAGE      = 0.3f;     // below -> pressure sensor fault (disconnected)
+// Above -> signal shorted to the 5 V rail (or sensor GND lost): the ADC pin then
+// saturates at 3.3 V = 4.95 V sensor-side. The scale table ends at 3.01 V = 10 bar.
+constexpr float PRESS_MAX_SAFE_VOLTAGE      = 4.8f;
 constexpr float FLAP_OPEN_TEMP              = 92.0f;    // flap hysteresis open (§5)
 constexpr float FLAP_CLOSE_TEMP             = 85.0f;    // flap hysteresis close (§5)
 constexpr float TEMP_STOP_ENGINE            = 122.0f;   // with low pressure -> stop engine
@@ -65,7 +68,7 @@ struct SituationFilter {
 
 // Raw sensor fault checks (tested on the raw Ω / V before conversion, §3).
 bool tempSensorFault(float resistance);  // shorted or open
-bool pressSensorFault(float vPressure);  // disconnected
+bool pressSensorFault(float vPressure);  // disconnected or shorted to 5 V
 
 // Piecewise-linear lookup; xTable must be strictly increasing, same size as yTable.
 float interpolate(float x, const float* xTable, const float* yTable, uint8_t size);
@@ -99,6 +102,12 @@ SituationFilter nextSituationFilter(SituationFilter prev, Situation raw, uint8_t
 // Next flap state: safety situations force open, overpressure holds, normal bands
 // use temperature hysteresis (§5); returns true = open.
 bool nextFlapState(Situation sit, float temperature, bool prevFlapOpen);
+
+// Situation shown on the OLED status line. Between 70 and 110 °C the flap follows
+// its own 92/85 °C hysteresis, so the REGULATION/NORMAL label follows the actual
+// flap state (REGULATING = flap open) instead of the 90 °C band edge. Display only:
+// decisions, LED, sound and pressure floors keep using `sit`.
+Situation displaySituation(Situation sit, bool flapOpen);
 
 AlertLevel situationAlert(Situation sit);
 const char* situationName(Situation sit);

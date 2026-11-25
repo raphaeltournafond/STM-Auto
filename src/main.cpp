@@ -12,6 +12,7 @@
 #include "ack.h"       // acknowledge state machine (unit-tested)
 #include "voice.h"     // MP3 voice mapping + DFPlayer frames (unit-tested)
 #include "lifecycle.h" // INIT self-test helpers (unit-tested)
+#include "gauge.h"     // OLED gauge scales (unit-tested)
 
 // ========== CONFIGURATION ==========
 
@@ -53,9 +54,10 @@ bool prevAckButton = false; // previous touch-button level (for rising-edge dete
 
 // ----- WS2812B RGB LED (primary indicator) -----
 // Driven over SPI2 MOSI (PIN_WS2812_DATA); SCLK/MISO are SPI2's other pins,
-// unused/unconnected. Each WS2812 bit is 3 SPI bits at ~2.4 MHz (see lib/ws2812).
-// A blocking 9-byte transfer is IRQ-safe (no bit-banging) and ample for one pixel.
-SPIClass WS2812_SPI(PIN_WS2812_DATA, PB14, PB13); // MOSI, (MISO), (SCLK)
+// reserved in pins.h but left unconnected. Each WS2812 bit is 3 SPI bits at
+// ~2.4 MHz (see lib/ws2812). A blocking 9-byte transfer is IRQ-safe (no
+// bit-banging) and ample for one pixel.
+SPIClass WS2812_SPI(PIN_WS2812_DATA, PIN_WS2812_SPI_MISO, PIN_WS2812_SPI_SCLK);
 
 void ws2812Send(const uint8_t* buf, uint8_t len) {
     WS2812_SPI.beginTransaction(SPISettings(2400000, MSBFIRST, SPI_MODE0));
@@ -213,8 +215,8 @@ void gaugeBootAnimation() {
     const bool pErr = pressSensorFault(vPressure);
     const int  tLen = ((int)temperature >= 100) ? 5 : 4;
     const int  pLen = (pressure >= 10.0f) ? 5 : 4;
-    const int  tTgt = tErr ? 0 : (int)(constrain((temperature - 40.0f) / (150.0f - 40.0f), 0.0f, 1.0f) * 128.0f);
-    const int  pTgt = pErr ? 0 : (int)(constrain(pressure / 8.0f, 0.0f, 1.0f) * 128.0f);
+    const int  tTgt = tErr ? 0 : gaugeFillWidth(temperature, GAUGE_TEMP_MIN, GAUGE_TEMP_MAX, SCREEN_WIDTH);
+    const int  pTgt = pErr ? 0 : gaugeFillWidth(pressure, GAUGE_PRESS_MIN, GAUGE_PRESS_MAX, SCREEN_WIDTH);
 
     uint32_t blinkMs = millis();
     bool     blinkOn = false;
@@ -396,7 +398,7 @@ void updateDisplay(Situation sit, float temperature, float resistance, float pre
     }
     display.setTextSize(1);
     display.setCursor(2, 4);
-    switch (sit) {
+    switch (displaySituation(sit, flapOpen)) { // REGULATING/NORMAL follow the flap
         case SIT_STOP_ENGINE:      display.print("!! STOP ENGINE !!"); break;
         case SIT_TEMP_SENSOR_ERR:  display.print("TEMP SENSOR ERROR"); break;
         case SIT_PRESS_SENSOR_ERR: display.print("PRESS SENSOR ERROR"); break;
@@ -427,7 +429,7 @@ void updateDisplay(Situation sit, float temperature, float resistance, float pre
         display.setCursor(37, 16);
         display.print("ERR");
     } else {
-        int fillW = (int)(constrain((temperature - 40.0f) / (150.0f - 40.0f), 0.0f, 1.0f) * 128.0f);
+        int fillW = gaugeFillWidth(temperature, GAUGE_TEMP_MIN, GAUGE_TEMP_MAX, SCREEN_WIDTH);
         if (fillW > 0) display.fillRect(0, 16, fillW, 24, SSD1306_WHITE);
         int len = ((int)temperature >= 100) ? 5 : 4;
         display.setTextColor(SSD1306_INVERSE);
@@ -445,7 +447,7 @@ void updateDisplay(Situation sit, float temperature, float resistance, float pre
         display.setCursor(37, 42);
         display.print("ERR");
     } else {
-        int fillW = (int)(constrain(pressure / 8.0f, 0.0f, 1.0f) * 128.0f);
+        int fillW = gaugeFillWidth(pressure, GAUGE_PRESS_MIN, GAUGE_PRESS_MAX, SCREEN_WIDTH);
         if (fillW > 0) display.fillRect(0, 41, fillW, 23, SSD1306_WHITE);
         int len = (pressure >= 10.0f) ? 5 : 4;
         display.setTextColor(SSD1306_INVERSE);

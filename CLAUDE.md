@@ -35,8 +35,11 @@ and calls into it:
 - **`lib/decision/decision.{h,cpp}`** — `evaluateSituation()` (priority matrix §3), `nextFlapState()`
   (§5 hysteresis), `nextAlarmLatches()` (§4 low-press + §5 overheat/overpressure latches),
   `nextSituationFilter()` (3-tick debounce), `tempSensorFault()`/`pressSensorFault()`,
-  `temperatureBand()`, `situationAlert()`, `interpolate()` and the sensor scale tables. All pure
-  functions taking state as parameters.
+  `displaySituation()` (status label: REGULATING/NORMAL follow the flap), `temperatureBand()`,
+  `situationAlert()`, `interpolate()` and the sensor scale tables. All pure functions taking state
+  as parameters.
+- **`lib/gauge/gauge.{h,cpp}`** — OLED gauge scales (`GAUGE_TEMP_*` 40–150 °C, `GAUGE_PRESS_*`
+  0–10 bar) and `gaugeFillWidth()`. A `static_assert` keeps `PRESS_OVER` inside the pressure bar.
 - **`lib/ws2812/ws2812.{h,cpp}`** — `alertColor()` and `encodePixelGRB()` (one WS2812B pixel → 9 SPI
   bytes, 3 SPI bits per WS bit). Pure; the SPI2 transmit lives in `main.cpp` (`ws2812Send()`).
 - **`lib/buzzer/buzzer.{h,cpp}`** — `buzzerPattern()` (situation → §3 sound pattern) and `buzzerOnAt()`
@@ -71,7 +74,8 @@ and calls into it:
   assumes it.
 - Keep the sensor fail-safes via `tempSensorFault()` / `pressSensorFault()`: resistance outside
   [`TEMP_MIN_SAFE_RESISTANCE`, `TEMP_MAX_SAFE_RESISTANCE`) → `TEMPERATURE ERROR`; pressure volt
-  < `PRESS_MIN_SAFE_VOLTAGE` → `PRESSURE ERROR`. INIT plausibility reuses the same window — keep
+  outside [`PRESS_MIN_SAFE_VOLTAGE`, `PRESS_MAX_SAFE_VOLTAGE`] (disconnected / shorted to 5 V) →
+  `PRESSURE ERROR`. INIT plausibility reuses the same windows — keep
   it wide enough for a cold-soak start (~18 kΩ at −20 °C).
 - `loop()` must call `IWatchdog.reload()` at least every 2 s (it does every 20 ms slice); any new
   blocking code in RUN must reload too.
@@ -82,7 +86,7 @@ and calls into it:
 |---|---|---|---|
 | Pressure sensor | `PA0` | Buzzer (tone→TIM3) | `PB6` |
 | Temp sensor | `PA1` | OLED SCL/SDA (I2C2) | `PB10`/`PB11` |
-| Flap servos ×2 (Servo→TIM2) | `PA6`/`PA7` | WS2812B RGB LED (SPI2 MOSI+DMA) | `PB15` |
+| Flap servos ×2 (Servo→TIM2) | `PA6`/`PA7` | WS2812B RGB LED (SPI2 MOSI; PB13/PB14 reserved) | `PB15` |
 | MP3 (USART1) | `PA9`/`PA10` | Backup LED (onboard) | `PC13` |
 | CAN RX/TX | `PA11`/`PA12` | ACK touch button | `PB5` |
 | Debug Serial (USART2) | `PA2`/`PA3` | | |

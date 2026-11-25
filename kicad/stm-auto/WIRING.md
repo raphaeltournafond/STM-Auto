@@ -21,7 +21,7 @@ KiCad 7 (`stm-auto.kicad_sch`). Convention: rails/buses on **global labels** (`5
 
 ## WS2812B RGB LED — `LED:WS2812B`
 
-Status indicator. Data from **PB15** (SPI2 MOSI + DMA in firmware). Symbol pins:
+Status indicator. Data from **PB15** (SPI2 MOSI in firmware, blocking transfer; SPI2 also claims PB13 SCK / PB14 MISO — leave them unconnected). Symbol pins:
 `1 VDD · 2 DOUT · 3 VSS · 4 DIN`.
 
 **Problem:** at 5 V VDD the LED needs V_IH = 0.7×VDD = 3.5 V on DIN, but PB15 only drives 3.3 V →

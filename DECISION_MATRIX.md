@@ -40,13 +40,13 @@ phases de vie, situations, seuils, sorties sur 4 canaux. Brochage : `src/pins.h`
 | # | Situation | Température | Pression | Volet | Écran | LED | Son |
 |---|---|---|---|---|---|---|---|
 | 1 | Err. capteur temp | R < 10 Ω ou ≥ 25 kΩ (brut) | — | Ouvert séc. | `TEMP SENS ERR` + Ω brut | Rouge | Bips longs ×N + voix |
-| 2 | Err. capteur press | — | V < 0,3 V (brut) | Ouvert séc. | `PRESS SENS ERR` + V brut | Rouge | Bips longs ×N + voix |
+| 2 | Err. capteur press | — | V < 0,3 V ou > 4,8 V (brut) | Ouvert séc. | `PRESS SENS ERR` + V brut | Rouge | Bips longs ×N + voix |
 | 3 | Stop engine | > 122 °C | < 1,2 bar | Ouvert 90° | `STOP ENGINE!` | Rouge | Buzzer continu + voix |
 | 4 | Chute pression | toute | < plancher §4 | Ouvert séc. | `LOW PRESS!` + bar | Rouge | Buzzer continu + voix |
 | 5 | Surpression | toute | > 9,5 bar | inchangé | `OVER PRESS` + bar | Rouge | Buzzer continu |
 | 6 | Surchauffe légère | 110–122 °C | OK | Ouvert 90° | Temp. clignotante | Jaune | Buzzer intermittent + voix |
-| 7 | Régulation | 90–110 °C | OK | Ouvert 90° | Normal + `FLAP: OPEN` | Off | — |
-| 8 | Normal | 70–89 °C | OK | Fermé 0° | Normal | Off | — |
+| 7 | Régulation | 90–110 °C | OK | Hystérésis §5 | Normal + `FLAP:` état réel | Off | — |
+| 8 | Normal | 70–89 °C | OK | Hystérésis §5 | Normal + `FLAP:` état réel | Off | — |
 | 9 | Moteur froid | < 70 °C | OK | Fermé 0° | Normal | Off | — |
 
 - Erreurs capteur en tête : mesure non fiable → rien n'est jugeable ; testées sur la grandeur
@@ -55,6 +55,13 @@ phases de vie, situations, seuils, sorties sur 4 canaux. Brochage : `src/pins.h`
   `RUN`. Sous 40 °C (fin de table, 925 Ω) la température affichée est plafonnée à 40 °C.
 - Mesures : moyenne de 16 échantillons ADC par lecture.
 - Volet **ouvert par défaut** en cas de doute/panne (privilégie le refroidissement).
+- Situations 7–8 : le volet suit l'hystérésis §5 (ouvre à 92 °C, ferme à 85 °C), pas la limite de
+  bande à 90 °C. L'écran affiche donc `REGULATING` quand le volet est **ouvert** et `NORMAL` quand
+  il est **fermé** (affichage seulement : LED, son et planchers de pression suivent la bande).
+- Err. capteur press > 4,8 V : signal court-circuité au 5 V (ou masse capteur perdue) — l'ADC
+  sature à 3,3 V soit 4,95 V côté capteur ; la table s'arrête à 3,01 V = 10 bar.
+- Jauges écran : température 40–150 °C, pression 0–10 bar (le seuil de surpression reste visible
+  sous la pleine échelle).
 - Surpression : ouvrir le volet ne réduit pas la pression → alerte seule, volet inchangé.
 
 ## 4. Plancher de pression adaptatif (situation 4)
