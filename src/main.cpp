@@ -71,9 +71,11 @@ void ws2812ShowAlert(AlertLevel level) {
 
 // ----- MP3 voice (DFPlayer Mini on USART1) -----
 // Debug Serial is on USART2 (see platformio.ini build_flags), so USART1 is free.
+// STM32duino core >= 3.0 renamed its HardwareSerial class to Uart (HardwareSerial
+// is now the abstract ArduinoCore-API base); the (rx, tx) pin constructor is unchanged.
 const uint8_t MP3_VOLUME = 22; // 0..30
 
-HardwareSerial MP3Serial(PIN_MP3_RX, PIN_MP3_TX);
+Uart MP3Serial(PIN_MP3_RX, PIN_MP3_TX);
 
 void dfplayerSend(uint8_t cmd, uint16_t param) {
     uint8_t frame[DF_FRAME_LEN];
