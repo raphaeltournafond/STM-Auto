@@ -120,13 +120,13 @@ void test_overheat_holds_until_below_108(void) {
     TEST_ASSERT_FALSE(nextOverheat(true, 107.9f));              // clears below 108
 }
 
-void test_overpressure_trips_above_6_5(void) {
-    TEST_ASSERT_FALSE(nextOverpressure(false, 6.5f));
-    TEST_ASSERT_TRUE(nextOverpressure(false, 6.6f));
+void test_overpressure_trips_above_ceiling(void) {
+    TEST_ASSERT_FALSE(nextOverpressure(false, PRESS_OVER));
+    TEST_ASSERT_TRUE(nextOverpressure(false, PRESS_OVER + 0.1f));
 }
 
-void test_overpressure_holds_until_6_2(void) {
-    TEST_ASSERT_TRUE(nextOverpressure(true, 6.4f));
+void test_overpressure_holds_until_clear(void) {
+    TEST_ASSERT_TRUE(nextOverpressure(true, PRESS_OVER - 0.1f));
     TEST_ASSERT_FALSE(nextOverpressure(true, PRESS_OVER_CLEAR));
 }
 
@@ -140,7 +140,7 @@ void test_alarm_latches_drop_on_sensor_fault(void) {
 
 void test_alarm_latches_evolve_when_sensors_ok(void) {
     AlarmLatches none = {false, false, false};
-    AlarmLatches next = nextAlarmLatches(none, true, 115.0f, 7.0f); // hot, high pressure
+    AlarmLatches next = nextAlarmLatches(none, true, 115.0f, 10.0f); // hot, high pressure
     TEST_ASSERT_FALSE(next.lowPress);
     TEST_ASSERT_TRUE(next.overheat);
     TEST_ASSERT_TRUE(next.overpressure);
@@ -184,7 +184,7 @@ void test_situation_low_pressure(void) {
 }
 
 void test_situation_overpressure(void) {
-    TEST_ASSERT_EQUAL(SIT_OVERPRESSURE, evaluateSituation(100.0f, 2.0f, 80.0f, 7.0f, L_OVERPRESS));
+    TEST_ASSERT_EQUAL(SIT_OVERPRESSURE, evaluateSituation(100.0f, 2.0f, 80.0f, 10.0f, L_OVERPRESS));
 }
 
 void test_situation_mild_overheat(void) {
@@ -220,12 +220,12 @@ void test_priority_stop_engine_beats_low_pressure(void) {
 
 void test_priority_low_pressure_beats_overpressure(void) {
     // lowPress and overpressure latches both set -> low pressure wins (checked first)
-    TEST_ASSERT_EQUAL(SIT_LOW_PRESSURE, evaluateSituation(100.0f, 2.0f, 80.0f, 7.0f, L_ALL));
+    TEST_ASSERT_EQUAL(SIT_LOW_PRESSURE, evaluateSituation(100.0f, 2.0f, 80.0f, 10.0f, L_ALL));
 }
 
 void test_priority_overpressure_beats_overheat(void) {
     AlarmLatches l = {false, true, true};
-    TEST_ASSERT_EQUAL(SIT_OVERPRESSURE, evaluateSituation(100.0f, 2.0f, 115.0f, 7.0f, l));
+    TEST_ASSERT_EQUAL(SIT_OVERPRESSURE, evaluateSituation(100.0f, 2.0f, 115.0f, 10.0f, l));
 }
 
 // ---------- situation debounce filter ----------
@@ -360,8 +360,8 @@ int main(int, char**) {
 
     RUN_TEST(test_overheat_trips_at_110);
     RUN_TEST(test_overheat_holds_until_below_108);
-    RUN_TEST(test_overpressure_trips_above_6_5);
-    RUN_TEST(test_overpressure_holds_until_6_2);
+    RUN_TEST(test_overpressure_trips_above_ceiling);
+    RUN_TEST(test_overpressure_holds_until_clear);
     RUN_TEST(test_alarm_latches_drop_on_sensor_fault);
     RUN_TEST(test_alarm_latches_evolve_when_sensors_ok);
 

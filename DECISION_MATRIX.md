@@ -43,7 +43,7 @@ phases de vie, situations, seuils, sorties sur 4 canaux. Brochage : `src/pins.h`
 | 2 | Err. capteur press | — | V < 0,3 V (brut) | Ouvert séc. | `PRESS SENS ERR` + V brut | Rouge | Bips longs ×N + voix |
 | 3 | Stop engine | > 122 °C | < 1,2 bar | Ouvert 90° | `STOP ENGINE!` | Rouge | Buzzer continu + voix |
 | 4 | Chute pression | toute | < plancher §4 | Ouvert séc. | `LOW PRESS!` + bar | Rouge | Buzzer continu + voix |
-| 5 | Surpression | toute | > 6,5 bar | inchangé | `OVER PRESS` + bar | Rouge | Buzzer continu |
+| 5 | Surpression | toute | > 9,5 bar | inchangé | `OVER PRESS` + bar | Rouge | Buzzer continu |
 | 6 | Surchauffe légère | 110–122 °C | OK | Ouvert 90° | Temp. clignotante | Jaune | Buzzer intermittent + voix |
 | 7 | Régulation | 90–110 °C | OK | Ouvert 90° | Normal + `FLAP: OPEN` | Off | — |
 | 8 | Normal | 70–89 °C | OK | Fermé 0° | Normal | Off | — |
@@ -78,7 +78,7 @@ sportive). Valeurs type ralenti.
 - **Pression** : réarmement via la colonne dédiée §4 (repasser au-dessus du réarmement, pas
   seulement du critique).
 - **Surchauffe légère** (situation 6) : entre à **110 °C**, sort sous **108 °C**.
-- **Surpression** (situation 5) : entre au-dessus de **6,5 bar**, sort à **≤ 6,2 bar**.
+- **Surpression** (situation 5) : entre au-dessus de **9,5 bar**, sort à **≤ 9,2 bar**.
 - **Confirmation** : une nouvelle situation doit être vue **3 cycles consécutifs** (~0,6 s) avant
   de devenir active → le bruit capteur ne fait pas clignoter les alertes (voix rejouée, LED,
   ack perdu).
@@ -122,6 +122,6 @@ USART1 = MP3, USART2 = console de débogage (`Serial` remappé via `build_flags`
 ## 9. Points ouverts
 
 - RPM via CAN (améliore la logique pression).
-- Seuil de surpression (6,5 bar) à confirmer ou situation 5 à abandonner.
+- Seuil de surpression (9,5 bar) à confirmer ou situation 5 à abandonner.
 - Liste / langue des messages vocaux.
 - Autres valeurs CAN à afficher (temp. eau, vitesse…).

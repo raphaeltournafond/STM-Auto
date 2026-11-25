@@ -25,21 +25,21 @@ enum AlertLevel { ALERT_OFF, ALERT_WARN, ALERT_ALARM }; // off / yellow / red
 // Temp sensor fault window on the raw resistance. Must stay wide enough for a
 // cold-soak start: the NTC reads ~18 kΩ at -20 °C, open circuit reads ~72 kΩ,
 // and the scale table bottoms out at 925 Ω = 40 °C (colder reads as 40 °C).
-constexpr float TEMP_MAX_SAFE_RESISTANCE = 25000.0f; // at/above -> open / disconnected
-constexpr float TEMP_MIN_SAFE_RESISTANCE = 10.0f;    // below -> shorted to GND (150 °C = 32 Ω)
-constexpr float PRESS_MIN_SAFE_VOLTAGE   = 0.3f;     // below -> pressure sensor fault
-constexpr float FLAP_OPEN_TEMP  = 92.0f;            // flap hysteresis open (§5)
-constexpr float FLAP_CLOSE_TEMP = 85.0f;            // flap hysteresis close (§5)
-constexpr float TEMP_STOP_ENGINE = 122.0f;          // with low pressure -> stop engine
-constexpr float TEMP_OVERHEAT    = 110.0f;          // mild overheat band start
-constexpr float TEMP_REGULATION  = 90.0f;           // thermal-regulation band start
-constexpr float TEMP_NORMAL      = 70.0f;           // normal band start
-constexpr float PRESS_STOP_ENGINE = 1.2f;           // stop-engine pressure
-constexpr float PRESS_OVER        = 6.5f;           // overpressure ceiling
+constexpr float TEMP_MAX_SAFE_RESISTANCE    = 25000.0f; // at/above -> open / disconnected
+constexpr float TEMP_MIN_SAFE_RESISTANCE    = 10.0f;    // below -> shorted to GND (150 °C = 32 Ω)
+constexpr float PRESS_MIN_SAFE_VOLTAGE      = 0.3f;     // below -> pressure sensor fault
+constexpr float FLAP_OPEN_TEMP              = 92.0f;    // flap hysteresis open (§5)
+constexpr float FLAP_CLOSE_TEMP             = 85.0f;    // flap hysteresis close (§5)
+constexpr float TEMP_STOP_ENGINE            = 122.0f;   // with low pressure -> stop engine
+constexpr float TEMP_OVERHEAT               = 110.0f;   // mild overheat band start
+constexpr float TEMP_REGULATION             = 90.0f;    // thermal-regulation band start
+constexpr float TEMP_NORMAL                 = 70.0f;    // normal band start
+constexpr float PRESS_STOP_ENGINE           = 1.2f;     // stop-engine pressure
+constexpr float PRESS_OVER                  = 9.5f;     // overpressure ceiling
 
 // ----- Alert hysteresis (§5): enter at the threshold, clear only past these -----
-constexpr float TEMP_OVERHEAT_CLEAR = 108.0f;       // mild overheat clears below
-constexpr float PRESS_OVER_CLEAR    = 6.2f;         // overpressure clears at/below
+constexpr float TEMP_OVERHEAT_CLEAR         = 108.0f;   // mild overheat clears below
+constexpr float PRESS_OVER_CLEAR            = 9.2f;     // overpressure clears at/below
 
 // A new situation must be seen on this many consecutive loop ticks (~200 ms
 // each) before it replaces the active one, so sensor noise cannot flicker
