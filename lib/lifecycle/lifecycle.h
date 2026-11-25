@@ -8,8 +8,8 @@
 constexpr float TEMP_PLAUSIBLE_MIN_RESISTANCE = TEMP_MIN_SAFE_RESISTANCE; // below -> shorted
 constexpr float TEMP_PLAUSIBLE_MAX_RESISTANCE = TEMP_MAX_SAFE_RESISTANCE; // at/above -> open
 
-// Startup life phases (DECISION_MATRIX §2): BOOT -> INIT -> RUN, with a blocking
-// INIT_FAIL from INIT. Phases run once at boot in setup(); RUN is the loop().
+// Startup life phases (DECISION_MATRIX §2): BOOT -> INIT -> RUN, with INIT_FAIL
+// from INIT (blocks until ACK or INIT_FAIL_TIMEOUT_MS, then INIT carries on). Phases run once at boot in setup(); RUN is the loop().
 // Pure helpers here (plausibility + fail mapping); the orchestration + hardware
 // self-tests live in src/main.cpp.
 
@@ -30,3 +30,20 @@ bool pressSensorPlausible(float vPressure);
 // (5 = "defaut", 0 = none).
 const char* initResultLabel(InitResult r);
 int initFailVoiceTrack(InitResult r);
+
+// INIT_FAIL gives up blocking after this long and lets INIT carry on into RUN,
+// which reports a sensor fault itself. A reset while driving (supply dip, loose
+// connector) must never leave the engine unmonitored waiting for an ACK press.
+constexpr uint32_t INIT_FAIL_TIMEOUT_MS = 10000;
+
+// INIT_FAIL blink/beep code: the failed step's position in the INIT order
+// (1 OLED, 2 MP3, 3 TEMP, 4 PRESS); 0 for INIT_OK.
+uint8_t initFailCode(InitResult r);
+
+// INIT_FAIL LED + buzzer envelope at time t (ms since INIT_FAIL was entered):
+// `code` long pulses (INIT_FAIL_PULSE_ON on / INIT_FAIL_PULSE_OFF off), then an
+// INIT_FAIL_PAUSE gap, repeating. code 0 is always off.
+constexpr uint32_t INIT_FAIL_PULSE_ON  = 600;
+constexpr uint32_t INIT_FAIL_PULSE_OFF = 400;
+constexpr uint32_t INIT_FAIL_PAUSE     = 1600;
+bool initFailPatternOn(uint8_t code, uint32_t t);

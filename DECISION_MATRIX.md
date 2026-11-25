@@ -9,7 +9,7 @@ phases de vie, situations, seuils, sorties sur 4 canaux. Brochage : `src/pins.h`
 ## 1. Architecture
 
 - **Phases de vie** (séquentielles, une fois au démarrage) : `BOOT → INIT → RUN`, avec
-  `INIT_FAIL` bloquant possible depuis `INIT`.
+  `INIT_FAIL` possible depuis `INIT` (bloquant jusqu'à ACK ou 10 s).
 - **Situations** (évaluées en continu en `RUN`) : priorité 1→9, **on s'arrête à la première
   vraie** → une seule active à la fois.
 
@@ -24,23 +24,30 @@ phases de vie, situations, seuils, sorties sur 4 canaux. Brochage : `src/pins.h`
 
 ## 2. Phases de vie
 
-- **BOOT** — LED clignote vite, bip de mise sous tension, logo écran.
-- **INIT** — auto-tests **tous bloquants** (échec → `INIT_FAIL`), affichés à l'écran, dans l'ordre :
-  1. OLED (en premier : sans écran, repli LED + voix) · 2. carte SD du MP3 ·
-  3. capteur température plausible · 4. capteur pression plausible · 5. cycle volet fermé→ouvert→fermé.
+- **BOOT** — LED clignote vite, bip de mise sous tension, logo écran. **Watchdog** matériel
+  (IWDG, 2 s) armé dès le début du BOOT : un blocage pendant BOOT, INIT ou RUN (ex. bus I2C figé)
+  provoque un reset.
+- **INIT** — auto-tests (échec → `INIT_FAIL`), affichés à l'écran, dans l'ordre :
+  1. OLED (en premier : sans écran, repli LED + voix) · 2. carte SD du MP3 (requête « nombre de
+  fichiers » au DFPlayer : pas de réponse ou 0 fichier → échec) · 3. capteur température
+  plausible · 4. capteur pression plausible · 5. cycle volet fermé→ouvert→fermé.
   LED clignote lentement.
-- **INIT_FAIL** — **bloquant total**. LED : code dédié ; son : bip long ×N + voix défaut ;
-  écran : code d'erreur + valeur brute (Ω / V).
-- **RUN** — nominal, régi par §3. **Watchdog** matériel (IWDG, 2 s, armé en fin d'INIT) si la
-  boucle se fige. Après un reset watchdog : redémarrage rapide directement en `RUN` (ni jingle,
-  ni animation, ni cycle volet, ni `INIT_FAIL` bloquant — `RUN` signale lui-même un défaut capteur).
+- **INIT_FAIL** — bloquant jusqu'à **ACK** (contournement) ou **10 s**, puis `INIT` continue
+  (étapes suivantes, puis `RUN`, qui signale lui-même un défaut capteur) : un reset en roulant
+  (chute d'alim, connecteur) ne laisse jamais le moteur sans surveillance. LED + son : **code N** =
+  numéro de l'étape en échec (1 OLED, 2 MP3, 3 temp., 4 press.) → N impulsions longues rouges +
+  bips (0,6 s / 0,4 s), pause 1,6 s, en boucle ; voix défaut ; écran : étape en échec + valeur
+  brute (Ω / V) + compte à rebours.
+- **RUN** — nominal, régi par §3. Après un reset watchdog : redémarrage rapide directement en
+  `RUN` (ni jingle, ni animation, ni cycle volet, ni `INIT_FAIL` — `RUN` signale lui-même un
+  défaut capteur).
 
 ## 3. Matrice de situations (RUN) — priorité décroissante, première vraie gagne
 
 | # | Situation | Température | Pression | Volet | Écran | LED | Son |
 |---|---|---|---|---|---|---|---|
-| 1 | Err. capteur temp | R < 10 Ω ou ≥ 25 kΩ (brut) | — | Ouvert séc. | `TEMP SENS ERR` + Ω brut | Rouge | Bips longs ×N + voix |
-| 2 | Err. capteur press | — | V < 0,3 V ou > 4,8 V (brut) | Ouvert séc. | `PRESS SENS ERR` + V brut | Rouge | Bips longs ×N + voix |
+| 1 | Err. capteur temp | R < 10 Ω ou ≥ 25 kΩ (brut) | — | Ouvert séc. | `TEMP SENSOR ERROR` + `ERR` Ω brut | Rouge | Bips longs ×N + voix |
+| 2 | Err. capteur press | — | V < 0,3 V ou > 4,8 V (brut) | Ouvert séc. | `PRESS SENSOR ERROR` + `ERR` V brut | Rouge | Bips longs ×N + voix |
 | 3 | Stop engine | > 122 °C | < 1,2 bar | Ouvert 90° | `STOP ENGINE!` | Rouge | Buzzer continu + voix |
 | 4 | Chute pression | toute | < plancher §4 | Ouvert séc. | `LOW PRESS!` + bar | Rouge | Buzzer continu + voix |
 | 5 | Surpression | toute | > 9,5 bar | inchangé | `OVER PRESS` + bar | Rouge | Buzzer continu |
@@ -53,7 +60,11 @@ phases de vie, situations, seuils, sorties sur 4 canaux. Brochage : `src/pins.h`
   **brute** (Ω, V) avant conversion. La plage temp. valide est large pour le démarrage à froid
   (≈ 18 kΩ à −20 °C ; circuit ouvert ≈ 72 kΩ ; court-circuit ≈ 0 Ω) et identique en `INIT` et
   `RUN`. Sous 40 °C (fin de table, 925 Ω) la température affichée est plafonnée à 40 °C.
-- Mesures : moyenne de 16 échantillons ADC par lecture.
+- Mesures : chaque cycle (~200 ms = 10 tranches de 20 ms) moyenne 40 échantillons ADC par capteur,
+  4 par tranche, **répartis sur tout le cycle** → filtre l'ondulation allumage/alternateur et les
+  pulsations de pression (une rafale unique de quelques µs ne le fait pas).
+- Écran en défaut capteur : `ERR` + valeur brute (ex. `ERR 72.4k` circuit ouvert, `ERR 4.95V`
+  court-circuit au 5 V ; `R` = ohm).
 - Volet **ouvert par défaut** en cas de doute/panne (privilégie le refroidissement).
 - Situations 7–8 : le volet suit l'hystérésis §5 (ouvre à 92 °C, ferme à 85 °C), pas la limite de
   bande à 90 °C. L'écran affiche donc `REGULATING` quand le volet est **ouvert** et `NORMAL` quand
@@ -63,6 +74,10 @@ phases de vie, situations, seuils, sorties sur 4 canaux. Brochage : `src/pins.h`
 - Jauges écran : température 40–150 °C, pression 0–10 bar (le seuil de surpression reste visible
   sous la pleine échelle).
 - Surpression : ouvrir le volet ne réduit pas la pression → alerte seule, volet inchangé.
+- Situation 6 : la température clignote (≈ 0,5 s) tant que l'alarme surchauffe est active, même
+  quand une autre alarme occupe la ligne d'état.
+- Console de débogage (USART2) : une ligne CSV `T,t_ms,ohm,degC,volt,bar,situation,flap,ack`
+  toutes les 500 ms (calibration au banc, enregistrement en roulage).
 
 ## 4. Plancher de pression adaptatif (situation 4)
 
@@ -97,7 +112,9 @@ sportive). Valeurs type ralenti.
   inférieure ou égale n'est pas jouée.
 - Une situation **nouvelle de priorité supérieure** repart en son malgré un ack précédent.
 - **Retour auto** au nominal dès que la condition disparaît.
-- **Multi-alarmes** : l'écran **alterne** entre les affichages.
+- **Multi-alarmes** : l'écran **alterne** entre les alarmes actives, **2 s** chacune : l'alarme
+  active (confirmée) d'abord, puis les autres par priorité. LED et son suivent l'alarme active
+  seule. `STOP ENGINE` n'alterne pas (il combine déjà température et pression).
 
 ## 7. Messages vocaux (MP3, carte SD)
 

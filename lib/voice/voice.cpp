@@ -29,3 +29,18 @@ void dfplayerFrame(uint8_t cmd, uint16_t param, uint8_t* out) {
     out[8] = (uint8_t)(chk & 0xFF);
     out[9] = 0xEF;                      // end
 }
+
+bool dfRxPush(DfRxParser* p, uint8_t byte, uint8_t* cmd, uint16_t* param) {
+    if (p->len == 0 && byte != 0x7E) return false; // wait for a start marker
+    p->buf[p->len++] = byte;
+    if (p->len < DF_FRAME_LEN) return false;
+    p->len = 0;
+    const uint8_t* f = p->buf;
+    if (f[1] != 0xFF || f[2] != 0x06 || f[9] != 0xEF) return false;
+    uint16_t sum = f[1] + f[2] + f[3] + f[4] + f[5] + f[6];
+    uint16_t chk = (uint16_t)((f[7] << 8) | f[8]);
+    if ((uint16_t)(sum + chk) != 0) return false;
+    *cmd   = f[3];
+    *param = (uint16_t)((f[5] << 8) | f[6]);
+    return true;
+}

@@ -61,6 +61,54 @@ void test_frame_markers_and_checksum(void) {
     TEST_ASSERT_EQUAL_HEX16(0, (uint16_t)(sum + chk));
 }
 
+// ---------- DFPlayer reply parser ----------
+
+static bool feed(DfRxParser* p, const uint8_t* bytes, int n, uint8_t* cmd, uint16_t* param) {
+    bool got = false;
+    for (int i = 0; i < n; i++) got = dfRxPush(p, bytes[i], cmd, param) || got;
+    return got;
+}
+
+void test_rx_parses_sd_file_count_reply(void) {
+    uint8_t frame[DF_FRAME_LEN];
+    dfplayerFrame(DF_CMD_QUERY_SD_FILES, 5, frame); // same layout as the module's reply
+    DfRxParser p = {{0}, 0};
+    uint8_t cmd = 0; uint16_t param = 0;
+    TEST_ASSERT_TRUE(feed(&p, frame, DF_FRAME_LEN, &cmd, &param));
+    TEST_ASSERT_EQUAL_HEX8(DF_CMD_QUERY_SD_FILES, cmd);
+    TEST_ASSERT_EQUAL_UINT16(5, param);
+}
+
+void test_rx_skips_noise_before_start_marker(void) {
+    uint8_t bytes[3 + DF_FRAME_LEN] = {0x00, 0xEF, 0x13};
+    dfplayerFrame(DF_CMD_ERROR, 1, bytes + 3);
+    DfRxParser p = {{0}, 0};
+    uint8_t cmd = 0; uint16_t param = 0;
+    TEST_ASSERT_TRUE(feed(&p, bytes, sizeof(bytes), &cmd, &param));
+    TEST_ASSERT_EQUAL_HEX8(DF_CMD_ERROR, cmd);
+}
+
+void test_rx_rejects_bad_checksum_then_recovers(void) {
+    uint8_t bad[DF_FRAME_LEN], good[DF_FRAME_LEN];
+    dfplayerFrame(DF_CMD_QUERY_SD_FILES, 5, bad);
+    bad[6] ^= 0x01;                                  // corrupt the parameter
+    dfplayerFrame(DF_CMD_QUERY_SD_FILES, 7, good);
+    DfRxParser p = {{0}, 0};
+    uint8_t cmd = 0; uint16_t param = 0;
+    TEST_ASSERT_FALSE(feed(&p, bad, DF_FRAME_LEN, &cmd, &param));
+    TEST_ASSERT_TRUE(feed(&p, good, DF_FRAME_LEN, &cmd, &param));
+    TEST_ASSERT_EQUAL_UINT16(7, param);
+}
+
+void test_rx_rejects_bad_end_marker(void) {
+    uint8_t frame[DF_FRAME_LEN];
+    dfplayerFrame(DF_CMD_QUERY_SD_FILES, 5, frame);
+    frame[9] = 0x00;
+    DfRxParser p = {{0}, 0};
+    uint8_t cmd = 0; uint16_t param = 0;
+    TEST_ASSERT_FALSE(feed(&p, frame, DF_FRAME_LEN, &cmd, &param));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_voice_track_mapping);
@@ -69,5 +117,9 @@ int main(int, char**) {
     RUN_TEST(test_frame_play_track_1);
     RUN_TEST(test_frame_set_volume_30);
     RUN_TEST(test_frame_markers_and_checksum);
+    RUN_TEST(test_rx_parses_sd_file_count_reply);
+    RUN_TEST(test_rx_skips_noise_before_start_marker);
+    RUN_TEST(test_rx_rejects_bad_checksum_then_recovers);
+    RUN_TEST(test_rx_rejects_bad_end_marker);
     return UNITY_END();
 }

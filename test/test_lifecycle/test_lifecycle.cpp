@@ -43,11 +43,58 @@ void test_init_result_label_nonempty(void) {
     TEST_ASSERT_EQUAL_STRING("TEMP SENS FAIL", initResultLabel(INIT_FAIL_TEMP));
 }
 
+void test_init_fail_code_follows_init_order(void) {
+    TEST_ASSERT_EQUAL_UINT8(0, initFailCode(INIT_OK));
+    TEST_ASSERT_EQUAL_UINT8(1, initFailCode(INIT_FAIL_OLED));
+    TEST_ASSERT_EQUAL_UINT8(2, initFailCode(INIT_FAIL_MP3_SD));
+    TEST_ASSERT_EQUAL_UINT8(3, initFailCode(INIT_FAIL_TEMP));
+    TEST_ASSERT_EQUAL_UINT8(4, initFailCode(INIT_FAIL_PRESS));
+}
+
+// Count rising edges of the pattern over one period, sampled every 10 ms.
+static int pulsesInPeriod(uint8_t code) {
+    const uint32_t period = code * (INIT_FAIL_PULSE_ON + INIT_FAIL_PULSE_OFF) + INIT_FAIL_PAUSE;
+    int pulses = 0;
+    bool prev = false;
+    for (uint32_t t = 0; t < period; t += 10) {
+        bool on = initFailPatternOn(code, t);
+        if (on && !prev) pulses++;
+        prev = on;
+    }
+    return pulses;
+}
+
+void test_init_fail_pattern_pulses_n_times(void) {
+    TEST_ASSERT_EQUAL_INT(1, pulsesInPeriod(1));
+    TEST_ASSERT_EQUAL_INT(3, pulsesInPeriod(3));
+    TEST_ASSERT_EQUAL_INT(4, pulsesInPeriod(4));
+}
+
+void test_init_fail_pattern_timing(void) {
+    TEST_ASSERT_TRUE(initFailPatternOn(2, 0));                                 // first pulse
+    TEST_ASSERT_FALSE(initFailPatternOn(2, INIT_FAIL_PULSE_ON));               // gap
+    TEST_ASSERT_TRUE(initFailPatternOn(2, INIT_FAIL_PULSE_ON + INIT_FAIL_PULSE_OFF)); // second
+    TEST_ASSERT_FALSE(initFailPatternOn(2, 2 * (INIT_FAIL_PULSE_ON + INIT_FAIL_PULSE_OFF))); // pause
+    const uint32_t period = 2 * (INIT_FAIL_PULSE_ON + INIT_FAIL_PULSE_OFF) + INIT_FAIL_PAUSE;
+    TEST_ASSERT_TRUE(initFailPatternOn(2, period));                            // repeats
+    TEST_ASSERT_FALSE(initFailPatternOn(0, 0));                                // INIT_OK: never
+}
+
+void test_init_fail_timeout_is_bounded(void) {
+    // A reset while driving must not leave the engine unmonitored for long, but
+    // the operator needs time to read the screen; keep it within a sane window.
+    TEST_ASSERT_TRUE(INIT_FAIL_TIMEOUT_MS >= 5000 && INIT_FAIL_TIMEOUT_MS <= 30000);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_temp_sensor_plausible);
     RUN_TEST(test_press_sensor_plausible);
     RUN_TEST(test_init_fail_voice_track);
     RUN_TEST(test_init_result_label_nonempty);
+    RUN_TEST(test_init_fail_code_follows_init_order);
+    RUN_TEST(test_init_fail_pattern_pulses_n_times);
+    RUN_TEST(test_init_fail_pattern_timing);
+    RUN_TEST(test_init_fail_timeout_is_bounded);
     return UNITY_END();
 }
