@@ -94,6 +94,14 @@ void test_format_voltage(void) {
     formatVoltage(2.999f, b, sizeof(b)); TEST_ASSERT_EQUAL_STRING("3.00V", b);
 }
 
+void test_format_duration(void) {
+    char b[16];
+    formatDuration(0, b, sizeof(b));       TEST_ASSERT_EQUAL_STRING("0:00", b);
+    formatDuration(42500, b, sizeof(b));   TEST_ASSERT_EQUAL_STRING("0:42", b);
+    formatDuration(754000, b, sizeof(b));  TEST_ASSERT_EQUAL_STRING("12:34", b);
+    formatDuration(5025000, b, sizeof(b)); TEST_ASSERT_EQUAL_STRING("1:23:45", b);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_alarm_single_shows_stable);
@@ -107,5 +115,6 @@ int main(int, char**) {
     RUN_TEST(test_format_resistance);
     RUN_TEST(test_format_resistance_fits_error_row);
     RUN_TEST(test_format_voltage);
+    RUN_TEST(test_format_duration);
     return UNITY_END();
 }

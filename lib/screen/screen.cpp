@@ -46,3 +46,10 @@ void formatVoltage(float volts, char* out, int size) {
     int hundredths = (int)(volts * 100.0f + 0.5f);
     snprintf(out, size, "%d.%02dV", hundredths / 100, hundredths % 100);
 }
+
+void formatDuration(uint32_t ms, char* out, int size) {
+    uint32_t sec = ms / 1000;
+    unsigned h = (unsigned)(sec / 3600), m = (unsigned)((sec / 60) % 60), s = (unsigned)(sec % 60);
+    if (h > 0) snprintf(out, size, "%u:%02u:%02u", h, m, s);
+    else       snprintf(out, size, "%u:%02u", m, s);
+}

@@ -39,6 +39,7 @@ and calls into it:
   `nextSituationFilter()` (3-tick debounce), `activeAlertMask()` (every active alarm, for the
   multi-alarm display), `tempSensorFault()`/`pressSensorFault()`,
   `displaySituation()` (status label: REGULATING/NORMAL follow the flap), `temperatureBand()`,
+  `lowPressCritical()` (current §4 floor, drawn on the pressure graph),
   `situationAlert()`, `interpolate()` and the sensor scale tables. All pure functions taking state
   as parameters.
 - **`lib/run/run.{h,cpp}`** — `runTick()`: one RUN decision tick chaining the helpers (conversions →
@@ -48,7 +49,8 @@ and calls into it:
   0–10 bar) and `gaugeFillWidth()`. A `static_assert` keeps `PRESS_OVER` inside the pressure bar.
 - **`lib/screen/screen.{h,cpp}`** — `alarmToShow()` (§6 multi-alarm alternation, 2 s each, STOP
   ENGINE never alternates), text layout (`centeredTextX()`, `tempTextChars()`, `pressTextChars()`)
-  and raw-value formatting without float printf (`formatResistance()` "72.4k", `formatVoltage()`).
+  and raw-value formatting without float printf (`formatResistance()` "72.4k", `formatVoltage()`,
+  `formatDuration()`).
 - **`lib/ws2812/ws2812.{h,cpp}`** — `alertColor()` and `encodePixelGRB()` (one WS2812B pixel → 9 SPI
   bytes, 3 SPI bits per WS bit). Pure; the SPI2 transmit lives in `main.cpp` (`ws2812Send()`).
 - **`lib/buzzer/buzzer.{h,cpp}`** — `buzzerPattern()` (situation → §3 sound pattern) and `buzzerOnAt()`
@@ -56,6 +58,16 @@ and calls into it:
 - **`lib/ack/ack.{h,cpp}`** — `updateAck()` acknowledge state machine (§6): mutes sound while keeping
   LED+screen, re-arms on a higher-priority alert, auto-returns when clear. Pure; the PB5 read + edge
   detect live in `main.cpp`.
+- **`lib/button/button.{h,cpp}`** — `buttonUpdate()`: touch-button gestures (§6/§10). A press while
+  an alert awaits ACK is `BTN_ACK` (on the press edge, nothing else); otherwise `BTN_TAP` (released
+  < `LONG_PRESS_MS` 1.5 s) or `BTN_LONG` (fires once while held).
+- **`lib/views/views.{h,cpp}`** — views + carousel (§10): `View` (MAIN/TEMP/PRESS/STATS/DIAG),
+  `viewNext()` (tap), `viewToggleCarousel()` (long press), `viewTick()` (advance every
+  `CAROUSEL_PERIOD_MS` 5 s, skips DIAG, held during a pending alert), `viewToShow()` (pending alert
+  forces MAIN).
+- **`lib/trend/trend.{h,cpp}`** — `History` ring buffer (128 × 5 s, int16 tenths, gaps for sensor
+  faults), `graphRange()`/`graphY()` scaling, `SessionStats`/`statsUpdate()` (T max, P max, P min
+  with warm oil, time ≥ 110 °C).
 - **`lib/voice/voice.{h,cpp}`** — `voiceTrack()` (situation → §7 MP3 file), `dfplayerFrame()`
   (DFPlayer Mini command frame + checksum) and `dfRxPush()` (incremental reply-frame parser, used by
   the INIT SD-card query). Pure; the USART1 I/O lives in `main.cpp`.
@@ -70,13 +82,16 @@ and calls into it:
   track-1 ready jingle then runs a gauge sweep animation before entering `loop()`. All waits use
   `waitMs()` (feeds the watchdog).
 - `loop()` ~200 ms — 10 × 20 ms slices, each feeding the watchdog, taking a 4-sample ADC burst per
-  sensor (averaged over the tick) and polling ACK; then `runTick()` and the outputs: `applyFlap()`
+  sensor (averaged over the tick) and calling `pollButton()` (ACK / next view / carousel toggle);
+  then `runTick()`, stats + history (every 5 s), `viewTick()`, and the outputs: `applyFlap()`
   (twin servos), `applyAlertLed()` (WS2812B primary + PC13 backup), `applyBuzzer()` (piezo via
   `tone()`, muted when acknowledged), `onSituationChange()` (edge-triggered MP3 voice via USART1),
-  `updateDisplay()` every 500 ms (`drawGaugeRows()` is shared with the boot animation; `showFrame()`
-  calls `OLED_I2C.begin()` first for the STM32F103 I2C BUSY-flag errata) and `printTelemetry()`
-  (CSV `T,…` line every 500 ms on debug Serial). `main.cpp` holds `RunState run`, `buzzerSounding`,
-  `prevSituation`, `prevAckButton`.
+  `updateDisplay()` every 500 ms or at once after a gesture / carousel step (dispatches the view:
+  main gauges via `drawGaugeRows()`, shared with the boot animation; temp/pressure trend graphs;
+  session stats; diag. `showFrame()` calls `OLED_I2C.begin()` first for the STM32F103 I2C BUSY-flag
+  errata) and `printTelemetry()` (CSV `T,…` line every 500 ms on debug Serial). `main.cpp` holds
+  `RunState run`, `ButtonState button`, `ViewState views`, the two `History` buffers, `stats`,
+  `buzzerSounding`, `prevSituation`.
 - **Tests**: `test/test_*/` (Unity) run via `pio test -e native` against `lib/` — the `native` env
   excludes `src/` so no hardware/toolchain is needed.
 
@@ -103,7 +118,7 @@ and calls into it:
 | Temp sensor | `PA1` | OLED SCL/SDA (I2C2) | `PB10`/`PB11` |
 | Flap servos ×2 (Servo→TIM2) | `PA6`/`PA7` | WS2812B RGB LED (SPI2 MOSI; PB13/PB14 reserved) | `PB15` |
 | MP3 (USART1) | `PA9`/`PA10` | Backup LED (onboard) | `PC13` |
-| CAN RX/TX | `PA11`/`PA12` | ACK touch button | `PB5` |
+| CAN RX/TX | `PA11`/`PA12` | ACK / view touch button | `PB5` |
 | Debug Serial (USART2) | `PA2`/`PA3` | | |
 
 Notes: `Servo` lib owns **TIM2**, `tone()` owns **TIM3** (shared timers — don't reuse them for PWM).

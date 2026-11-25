@@ -28,3 +28,5 @@ int pressTextChars(float pressure); // print(p, 1) rounds: 9.96 -> "10.0b"
 void formatResistance(float ohms, char* out, int size);
 // "4.95V".
 void formatVoltage(float volts, char* out, int size);
+// Duration: "m:ss" under an hour, "h:mm:ss" above.
+void formatDuration(uint32_t ms, char* out, int size);

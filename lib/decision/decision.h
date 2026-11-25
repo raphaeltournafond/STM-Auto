@@ -80,6 +80,9 @@ float pressureFromVoltage(float vPressure);
 // Temperature band index: 0:<70  1:70-89  2:90-110  3:110-122  4:>122
 uint8_t temperatureBand(float temperature);
 
+// Low-pressure alarm threshold for this temperature (§4 "critique sous").
+float lowPressCritical(float temperature);
+
 // Adaptive low-pressure alarm with per-band hysteresis (§4); returns next state.
 bool nextLowPressAlarm(bool prev, float temperature, float pressure);
 

@@ -25,6 +25,9 @@ pressure floors, hysteresis, acknowledgement and voice messages) lives in
   (resistance / voltage) before conversion.
 - **Status display** — temperature, pressure, flap state and alert banner on the OLED (alternating
   between simultaneous alarms, raw Ω / V on a sensor fault), plus an onboard backup alert LED.
+- **Views + carousel** — one touch button: a tap acknowledges a pending alert; otherwise a tap
+  shows the next view (main gauges, temperature trend, pressure trend with the alarm floor, session
+  stats, diagnostics) and a long press (≥ 1.5 s) toggles a 5 s carousel.
 - **Self-recovering** — hardware watchdog from power-on; a failed start-up self-test never blocks
   monitoring for more than 10 s.
 - **Telemetry** — a CSV line (`T,…`) every 500 ms on the debug serial for bench calibration and
@@ -45,7 +48,7 @@ Pin map (source of truth: [`src/pins.h`](src/pins.h)):
 | Temperature sensor | `PA1` | OLED SCL / SDA (I2C2) | `PB10` / `PB11` |
 | Flap servos ×2 (`Servo` → TIM2) | `PA6` / `PA7` | WS2812B RGB LED (SPI2 MOSI; PB13/PB14 reserved) | `PB15` |
 | MP3 module (USART1) | `PA9` / `PA10` | Onboard backup LED | `PC13` |
-| CAN RX / TX | `PA11` / `PA12` | ACK touch button | `PB5` |
+| CAN RX / TX | `PA11` / `PA12` | ACK / view touch button | `PB5` |
 | Debug Serial (USART2) | `PA2` / `PA3` | | |
 
 Per-peripheral wiring decisions (supply rails, level handling, supporting parts) are documented in
@@ -76,7 +79,9 @@ Build Tools, C++ workload; run `pio pkg install -e native` once to fetch Unity).
   sensor conversions), `ws2812/` (WS2812B pixel → SPI byte encoding), `buzzer/` (alert patterns +
   envelope), `ack/` (acknowledge state machine), `voice/` (MP3 mapping + DFPlayer frames + reply
   parser), `lifecycle/` (INIT self-test helpers), `gauge/` (gauge scales), `screen/` (alarm
-  alternation, layout, raw-value formatting) and `run/` (the whole RUN decision tick). State is
+  alternation, layout, raw-value formatting), `run/` (the whole RUN decision tick), `button/`
+  (tap / long press / ACK gestures), `views/` (views + carousel) and `trend/` (graph history,
+  session stats). State is
   passed in as parameters, so it builds and runs natively and is fully unit-testable.
 - **`src/main.cpp`** — owns all hardware I/O (servos, OLED, ADC, LEDs, SPI, serial) and the evolving
   state, sampling the sensors across each ~200 ms loop and calling `runTick()`.
@@ -108,7 +113,7 @@ temperature + pressure
 reading, twin-servo thermal regulation with hysteresis, the full situation decision matrix with
 adaptive low-pressure floor, OLED status display, WS2812B RGB alert indicator (off/yellow/red) with
 onboard backup LED, buzzer alert patterns, ACK touch button (mutes sound, §6), multi-alarm display
-alternation, MP3 voice prompts (§7), serial telemetry, native tests + CI.
+alternation, switchable views with trend graphs + carousel (§10), MP3 voice prompts (§7), serial telemetry, native tests + CI.
 
 **Wired but not yet coded** (pins assigned, schematic complete): CAN / engine-RPM input. See
 `DECISION_MATRIX.md` for the roadmap.

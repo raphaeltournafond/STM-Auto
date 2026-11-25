@@ -16,6 +16,9 @@
 #include "lifecycle.h" // INIT self-test helpers (unit-tested)
 #include "gauge.h"     // OLED gauge scales (unit-tested)
 #include "screen.h"    // OLED alarm cycling / layout / raw values (unit-tested)
+#include "button.h"    // touch-button gestures: ACK / tap / long press (unit-tested)
+#include "views.h"     // OLED views + carousel (unit-tested)
+#include "trend.h"     // trend history + session stats (unit-tested)
 
 // ========== CONFIGURATION ==========
 
@@ -29,6 +32,7 @@ TwoWire OLED_I2C(PIN_OLED_SDA, PIN_OLED_SCL);
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &OLED_I2C, OLED_RESET);
 
 const uint32_t DISPLAY_PERIOD_MS   = 500; // OLED refresh
+const uint32_t TOAST_MS            = 1500; // header message after a long press
 const uint32_t TELEMETRY_PERIOD_MS = 500; // CSV line on the debug Serial
 
 // ----- HARDWARE Constants -----
@@ -63,7 +67,16 @@ Servo flapServo2;
 RunState run = runStateInit();
 bool buzzerSounding = false; // current buzzer tone on/off (avoids retriggering tone())
 int prevSituation = -1;     // last dispatched situation (edge-triggered sound/voice)
-bool prevAckButton = false; // previous touch-button level (for rising-edge detect)
+ButtonState button = buttonInit(); // touch-button gesture state (§6/§10)
+
+// ----- Views (§10) -----
+ViewState views = viewInit(0);    // selected view + carousel
+History tempHistory, pressHistory; // ~10 min trends for the graph views
+SessionStats stats = statsInit();  // since power-on
+bool displayDirty = false;         // redraw at once (view change) instead of waiting
+uint32_t toastUntilMs = 0;         // header shows toastText until then
+const char* toastText = "";
+bool fastRestarted = false;        // this boot came from a watchdog reset (DIAG view)
 
 // Delay that keeps the watchdog fed: use instead of delay() for any wait > ~1 s
 // total, and everywhere in setup().
@@ -391,6 +404,10 @@ void setup() {
     ws2812ShowAlert(ALERT_OFF);
     MP3Serial.begin(9600);                // DFPlayer Mini default baud
 
+    historyInit(&tempHistory);
+    historyInit(&pressHistory);
+    fastRestarted = watchdogReset;
+
     if (watchdogReset) {
         // Something hung: get back to monitoring at once. Skip the jingle,
         // animations, flap cycle and INIT_FAIL (RUN reports any sensor fault
@@ -497,25 +514,25 @@ void onSituationChange(Situation sit) {
     playVoice(voiceTrackOnEntry(sit, run.ack.acked));
 }
 
-// ----- DISPLAY -----
-// Status line: the active alarm, alternating between simultaneous alarms (§6);
-// REGULATING/NORMAL follow the flap. Gauges: values, or "ERR <raw Ω/V>" on a
-// sensor fault (§3). The temperature blinks while the overheat alarm is active.
-void updateDisplay(const RunResult& r, float resistance, float vPressure, uint32_t nowMs) {
-    static bool blinkPhase = false;
-    blinkPhase = !blinkPhase; // one toggle per frame (~DISPLAY_PERIOD_MS)
+// ----- DISPLAY (views, §10) -----
+// An alert awaiting ACK forces the main view. Once acknowledged (or with no
+// alert), a tap shows the next view and a long press toggles the carousel; an
+// acknowledged alert keeps its status line at the top of every view.
 
-    display.clearDisplay();
-    display.setTextWrap(false);
+const int VALUE_ROW_Y = 18; // size-2 value on the secondary views
+const int GRAPH_TOP   = 36; // trend graph area: y=36..63
+const int GRAPH_H     = 28;
 
-    const Situation shown = displaySituation(alarmToShow(r.sit, r.alertMask, nowMs), run.flapOpen);
-    if (situationAlert(shown) != ALERT_OFF) { // alerts invert the strip for visibility
+// Status line (y=0-15): the active alarm, alternating between simultaneous alarms
+// (§6); REGULATING/NORMAL follow the flap. Alerts invert the strip.
+static void drawStatusLine(Situation shown) {
+    const char* flap = run.flapOpen ? "OPEN" : "CLSD";
+    if (situationAlert(shown) != ALERT_OFF) {
         display.fillRect(0, 0, SCREEN_WIDTH, 16, SSD1306_WHITE);
         display.setTextColor(SSD1306_BLACK);
     } else {
         display.setTextColor(SSD1306_WHITE);
     }
-    const char* flap = run.flapOpen ? "OPEN" : "CLSD";
     display.setTextSize(1);
     display.setCursor(2, 4);
     switch (shown) {
@@ -530,17 +547,174 @@ void updateDisplay(const RunResult& r, float resistance, float vPressure, uint32
         case SIT_COLD:             display.print("COLD      FLAP:"); display.print(flap); break;
     }
     display.setTextColor(SSD1306_WHITE);
+}
 
+// Secondary view header: title left, page right ("AUTO 2/5" in carousel mode).
+static void drawViewHeader(View v) {
+    char page[12];
+    snprintf(page, sizeof(page), "%s%u/%u", views.carousel ? "AUTO " : "",
+             (unsigned)viewNumber(v), (unsigned)VIEW_COUNT);
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(2, 4);
+    display.print(viewTitle(v));
+    display.setCursor(SCREEN_WIDTH - 2 - (int)strlen(page) * 6, 4);
+    display.print(page);
+}
+
+// Short message in place of the header (carousel on/off feedback).
+static void drawToast() {
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(centeredTextX((int)strlen(toastText), 6, SCREEN_WIDTH), 4);
+    display.print(toastText);
+}
+
+// Trend graph, one column per sample, newest at the right edge; sensor-fault
+// gaps break the line.
+static void drawGraph(const History* h, float lo, float hi) {
+    int prevX = -1, prevY = 0;
+    for (uint8_t i = 0; i < h->count; i++) {
+        const int x = SCREEN_WIDTH - h->count + i;
+        float v;
+        if (!historyAt(h, i, &v)) { prevX = -1; continue; }
+        const int y = graphY(v, lo, hi, GRAPH_TOP, GRAPH_H);
+        if (prevX >= 0) display.drawLine(prevX, prevY, x, y, SSD1306_WHITE);
+        else            display.drawPixel(x, y, SSD1306_WHITE);
+        prevX = x;
+        prevY = y;
+    }
+}
+
+// Window max/min on the right of the value row, then the graph (autoscaled, at
+// least minSpan tall). An optional threshold is drawn as a dotted line.
+static void drawTrend(const History* h, float minSpan, int decimals, bool showLabels,
+                      bool hasMark, float mark) {
+    float dLo, dHi;
+    if (!historyMinMax(h, &dLo, &dHi)) {
+        display.setTextSize(1);
+        display.setCursor(28, 46);
+        display.print("collecting...");
+        return;
+    }
+    if (showLabels) {
+        display.setTextSize(1);
+        display.setCursor(70, VALUE_ROW_Y);     display.print("max "); display.print(dHi, decimals);
+        display.setCursor(70, VALUE_ROW_Y + 9); display.print("min "); display.print(dLo, decimals);
+    }
+    float lo = dLo, hi = dHi;
+    if (hasMark) { if (mark < lo) lo = mark; if (mark > hi) hi = mark; }
+    float gLo, gHi;
+    graphRange(lo, hi, minSpan, &gLo, &gHi);
+    if (hasMark) {
+        const int y = graphY(mark, gLo, gHi, GRAPH_TOP, GRAPH_H);
+        for (int x = 0; x < SCREEN_WIDTH; x += 4) display.drawPixel(x, y, SSD1306_WHITE);
+    }
+    drawGraph(h, gLo, gHi);
+}
+
+// "ERR <raw>" in the value row of a secondary view.
+static void drawValueError(const char* raw) {
+    char buf[16];
+    snprintf(buf, sizeof(buf), "ERR %s", raw);
+    display.setTextSize(2);
+    display.setCursor(0, VALUE_ROW_Y);
+    display.print(buf);
+}
+
+static void drawTempView(const RunResult& r, bool tErr, const char* tRaw) {
+    if (tErr) {
+        drawValueError(tRaw);
+    } else {
+        display.setTextSize(2);
+        display.setCursor(0, VALUE_ROW_Y);
+        display.print((int)r.temperature);
+        display.write(247);
+        display.print("C");
+    }
+    drawTrend(&tempHistory, 10.0f, 0, !tErr, false, 0.0f);
+}
+
+// Pressure + trend; the dotted line is the current low-pressure alarm floor (§4).
+static void drawPressView(const RunResult& r, bool tErr, bool pErr, const char* pRaw) {
+    if (pErr) {
+        drawValueError(pRaw);
+    } else {
+        display.setTextSize(2);
+        display.setCursor(0, VALUE_ROW_Y);
+        display.print(r.pressure, 1);
+        display.print("b");
+    }
+    drawTrend(&pressHistory, 1.0f, 1, !pErr, !tErr, lowPressCritical(r.temperature));
+}
+
+static void drawStatsView(uint32_t nowMs) {
+    char buf[12];
+    display.setTextSize(1);
+    int y = VALUE_ROW_Y;
+    auto label = [&](const char* text) { display.setCursor(2, y); display.print(text); display.setCursor(80, y); };
+
+    label("T max");
+    if (stats.any) { display.print(stats.tempMax, 1); display.print("C"); } else display.print("--");
+    y += 9; label("P max");
+    if (stats.any) { display.print(stats.pressMax, 1); display.print("b"); } else display.print("--");
+    y += 9; label("P min hot");
+    if (stats.anyWarm) { display.print(stats.pressMinWarm, 1); display.print("b"); } else display.print("--");
+    y += 9; label("Time >110C");
+    formatDuration(stats.hotMs, buf, sizeof(buf)); display.print(buf);
+    y += 9; label("Uptime");
+    formatDuration(nowMs, buf, sizeof(buf)); display.print(buf);
+}
+
+static void drawDiagView(const RunResult& r, const char* tRaw, const char* pRaw) {
+    display.setTextSize(1);
+    display.setCursor(2, 18);  display.print("R ");  display.print(tRaw);
+    display.setCursor(64, 18); display.print("T ");  display.print(r.temperature, 1); display.print("C");
+    display.setCursor(2, 27);  display.print("V ");  display.print(pRaw);
+    display.setCursor(64, 27); display.print("P ");  display.print(r.pressure, 2); display.print("b");
+    display.setCursor(2, 36);  display.print("SIT "); display.print(situationName(r.sit));
+    display.setCursor(2, 45);  display.print("FLAP "); display.print(run.flapOpen ? "OPEN" : "CLSD");
+    display.setCursor(64, 45); display.print("ACK ");  display.print(run.ack.acked ? "yes" : "no");
+    display.setCursor(2, 54);  display.print("FLOOR "); display.print(lowPressCritical(r.temperature), 1); display.print("b");
+    display.setCursor(64, 54); display.print("WDT ");  display.print(fastRestarted ? "reset" : "ok");
+}
+
+// periodic = regular DISPLAY_PERIOD_MS frame (drives the overheat blink); false
+// for an immediate redraw after a button gesture or a carousel step.
+void updateDisplay(const RunResult& r, float resistance, float vPressure, uint32_t nowMs, bool periodic) {
+    static bool blinkPhase = false;
+    if (periodic) blinkPhase = !blinkPhase;
+
+    display.clearDisplay();
+    display.setTextWrap(false);
+
+    const bool alert = situationAlert(r.sit) != ALERT_OFF;
+    const View v = viewToShow(views, alert && !run.ack.acked);
     const bool tErr = tempSensorFault(resistance);
     const bool pErr = pressSensorFault(vPressure);
-    const bool hot  = r.alertMask & (1u << SIT_MILD_OVERHEAT);
     char tRaw[8], pRaw[8];
     formatResistance(resistance, tRaw, sizeof(tRaw));
     formatVoltage(vPressure, pRaw, sizeof(pRaw));
-    drawGaugeRows(r.temperature, r.pressure, tErr, pErr,
-                  tErr ? 0 : gaugeFillWidth(r.temperature, GAUGE_TEMP_MIN, GAUGE_TEMP_MAX, SCREEN_WIDTH),
-                  pErr ? 0 : gaugeFillWidth(r.pressure, GAUGE_PRESS_MIN, GAUGE_PRESS_MAX, SCREEN_WIDTH),
-                  !hot || blinkPhase, tRaw, pRaw);
+
+    if ((int32_t)(toastUntilMs - nowMs) > 0) drawToast();
+    else if (v == VIEW_MAIN || alert) drawStatusLine(displaySituation(alarmToShow(r.sit, r.alertMask, nowMs), run.flapOpen));
+    else drawViewHeader(v);
+
+    switch (v) {
+        case VIEW_TEMP:  drawTempView(r, tErr, tRaw); break;
+        case VIEW_PRESS: drawPressView(r, tErr, pErr, pRaw); break;
+        case VIEW_STATS: drawStatsView(nowMs); break;
+        case VIEW_DIAG:  drawDiagView(r, tRaw, pRaw); break;
+        default: {
+            // Main: gauges; the temperature blinks while the overheat alarm is active.
+            const bool hot = r.alertMask & (1u << SIT_MILD_OVERHEAT);
+            drawGaugeRows(r.temperature, r.pressure, tErr, pErr,
+                          tErr ? 0 : gaugeFillWidth(r.temperature, GAUGE_TEMP_MIN, GAUGE_TEMP_MAX, SCREEN_WIDTH),
+                          pErr ? 0 : gaugeFillWidth(r.pressure, GAUGE_PRESS_MIN, GAUGE_PRESS_MAX, SCREEN_WIDTH),
+                          !hot || blinkPhase, tRaw, pRaw);
+            break;
+        }
+    }
     showFrame();
 }
 
@@ -560,11 +734,56 @@ void printTelemetry(const RunResult& r, float resistance, float vPressure) {
 }
 
 
-// On an ACK rising edge: mute an in-progress voice prompt and give a feedback blip.
+// ----- BUTTON GESTURES (§6/§10) -----
+
+void blip(uint32_t ms) { tone(PIN_BUZZER, BUZZER_FREQ_HZ); delay(ms); noTone(PIN_BUZZER); }
+
+// ACK (press while an alert awaits acknowledgement): mute an in-progress voice
+// prompt and give a feedback blip.
 void onAckPress() {
     if (run.ack.acked) stopVoice();
-    tone(PIN_BUZZER, BUZZER_FREQ_HZ); delay(60); noTone(PIN_BUZZER);
+    blip(60);
     buzzerSounding = false;
+}
+
+// Long press: carousel on/off. Feedback: two short blips = on, one long = off,
+// plus a header message for TOAST_MS.
+void onCarouselToggle(uint32_t nowMs) {
+    static char text[22];
+    if (views.carousel) {
+        snprintf(text, sizeof(text), "CAROUSEL ON (%us)", (unsigned)(CAROUSEL_PERIOD_MS / 1000));
+        blip(50); delay(70); blip(50);
+    } else {
+        snprintf(text, sizeof(text), "CAROUSEL OFF");
+        blip(250);
+    }
+    buzzerSounding = false;
+    toastText    = text;
+    toastUntilMs = nowMs + TOAST_MS;
+}
+
+// Poll the touch button once (every 20 ms slice) and act on a completed gesture.
+void pollButton() {
+    const uint32_t now = millis();
+    const bool ackPending = situationAlert(run.filter.stable) != ALERT_OFF && !run.ack.acked;
+    switch (buttonUpdate(&button, digitalRead(PIN_ACK_BUTTON), now, ackPending)) {
+        case BTN_ACK:
+            run.ack = updateAck(run.ack, run.filter.stable, true);
+            onAckPress();
+            displayDirty = true;
+            break;
+        case BTN_TAP:
+            views = viewNext(views, now);
+            displayDirty = true;
+            break;
+        case BTN_LONG:
+            views = viewToggleCarousel(views, now);
+            onCarouselToggle(now);
+            displayDirty = true;
+            break;
+        default:
+            break;
+    }
 }
 
 
@@ -573,19 +792,14 @@ void onAckPress() {
 void loop() {
     // ----- SAMPLE + WAIT (~200 ms) -----
     // TICK_SLICES x 20 ms: feed the watchdog, take an ADC burst per sensor, and
-    // poll the ACK button so short taps are never missed (acked immediately).
+    // poll the button so short taps are never missed (an ACK applies at once).
     uint32_t tSum = 0, pSum = 0;
     for (uint8_t i = 0; i < TICK_SLICES; i++) {
         delay(SLICE_MS);
         IWatchdog.reload();
         tSum += readPinSum(PIN_TEMP_SENSE, ADC_BURST);
         pSum += readPinSum(PIN_PRESS_SENSE, ADC_BURST);
-        const bool ackNow = digitalRead(PIN_ACK_BUTTON);
-        if (ackNow && !prevAckButton) {
-            run.ack = updateAck(run.ack, run.filter.stable, true);
-            onAckPress();
-        }
-        prevAckButton = ackNow;
+        pollButton();
     }
     const uint16_t samples  = (uint16_t)TICK_SLICES * ADC_BURST;
     const float resistance  = dividerResistance(countsToVolts(tSum, samples));
@@ -601,11 +815,32 @@ void loop() {
     applyBuzzer(r.sit, run.ack.acked);    // ack mutes the buzzer
     if ((int)r.sit != prevSituation) { onSituationChange(r.sit); prevSituation = r.sit; }
 
+    // ----- TRENDS + STATS (§10) -----
     const uint32_t nowMs = millis();
+    const bool tOk = !tempSensorFault(resistance);
+    const bool pOk = !pressSensorFault(vPressure);
+    static uint32_t lastTickMs = 0, lastHistoryMs = 0;
+    static bool historyStarted = false;
+    stats = statsUpdate(stats, tOk && pOk, r.temperature, r.pressure, lastTickMs ? nowMs - lastTickMs : 0);
+    lastTickMs = nowMs;
+    if (!historyStarted || nowMs - lastHistoryMs >= HISTORY_SAMPLE_MS) {
+        historyStarted = true;
+        lastHistoryMs  = nowMs;
+        historyPush(&tempHistory, r.temperature, tOk);
+        historyPush(&pressHistory, r.pressure, pOk);
+    }
+
+    // ----- VIEWS + DISPLAY -----
+    const View selectedBefore = views.selected;
+    views = viewTick(views, nowMs, situationAlert(r.sit) != ALERT_OFF && !run.ack.acked);
+    if (views.selected != selectedBefore) displayDirty = true;
+
     static uint32_t lastDisplayMs = 0, lastTelemetryMs = 0;
-    if (oledOk && (nowMs - lastDisplayMs >= DISPLAY_PERIOD_MS)) {
-        lastDisplayMs = nowMs;
-        updateDisplay(r, resistance, vPressure, nowMs);
+    const bool periodic = nowMs - lastDisplayMs >= DISPLAY_PERIOD_MS;
+    if (oledOk && (periodic || displayDirty)) {
+        if (periodic) lastDisplayMs = nowMs;
+        displayDirty = false;
+        updateDisplay(r, resistance, vPressure, nowMs, periodic);
     }
     if (nowMs - lastTelemetryMs >= TELEMETRY_PERIOD_MS) {
         lastTelemetryMs = nowMs;
