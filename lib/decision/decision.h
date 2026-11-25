@@ -8,7 +8,7 @@
 // Situations by priority (top = highest); first true wins (§3).
 enum Situation {
     SIT_TEMP_SENSOR_ERR,  // 1  R outside [TEMP_MIN_SAFE_RESISTANCE, TEMP_MAX_SAFE_RESISTANCE)
-    SIT_PRESS_SENSOR_ERR, // 2  V < PRESS_MIN_SAFE_VOLTAGE
+    SIT_PRESS_SENSOR_ERR, // 2  V outside [PRESS_MIN_SAFE_VOLTAGE, PRESS_MAX_SAFE_VOLTAGE]
     SIT_STOP_ENGINE,      // 3  too hot AND too low pressure
     SIT_LOW_PRESSURE,     // 4  pressure below adaptive floor (§4)
     SIT_OVERPRESSURE,     // 5  pressure above ceiling
@@ -53,7 +53,7 @@ constexpr uint8_t SITUATION_CONFIRM_TICKS = 3;
 struct AlarmLatches {
     bool lowPress;     // adaptive low-pressure floor (§4)
     bool overheat;     // mild overheat band (110 °C, clears < 108 °C)
-    bool overpressure; // overpressure (> 6.5 bar, clears <= 6.2 bar)
+    bool overpressure; // overpressure (> 9.5 bar, clears <= 9.2 bar)
 };
 
 // Debounce state for the active situation (see SITUATION_CONFIRM_TICKS).
