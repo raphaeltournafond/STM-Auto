@@ -30,8 +30,8 @@ pressure floors, hysteresis, acknowledgement and voice messages) lives in
   stats, diagnostics) and a long press (≥ 1.5 s) toggles a 5 s carousel.
 - **Self-recovering** — hardware watchdog from power-on; a failed start-up self-test never blocks
   monitoring for more than 10 s.
-- **Telemetry** — a CSV line (`T,…`) every 500 ms on the debug serial for bench calibration and
-  in-car logging.
+- **Telemetry + calibration** — a CSV line (`T,…`) every 500 ms on the debug serial; a script
+  turns logged drives into vehicle-specific oil-pressure alarm floors (see Calibration).
 - **Tested** — pure decision logic is unit-tested on the host and gated by CI.
 
 ## Hardware
@@ -90,7 +90,7 @@ Build Tools, C++ workload; run `pio pkg install -e native` once to fetch Unity).
 src/            firmware (main.cpp, pins.h)
 lib/            pure libraries — unit-tested
 test/           Unity test suites (native)
-scripts/        helper scripts (MSVC test runner for Windows)
+scripts/        MSVC test runner, telemetry analysis / calibration, build helpers
 sounds/         MP3 voice prompts for the DFPlayer SD card (§7)
 kicad/stm-auto/ schematic, PCB, wiring notes
 ```
@@ -105,6 +105,39 @@ pio test -e native
 
 [GitHub Actions](.github/workflows/ci.yml) runs the unit tests and the firmware build on every pull
 request and on pushes to `main`, and reports flash / RAM usage in the job summary.
+
+## Calibration (oil-pressure floors)
+
+The low-pressure alarm floors (`DECISION_MATRIX.md` §4) ship with generic idle-type values. They
+can be raised to match your engine, oil and sensor position from logged drives. They are never
+lowered: the generic values are a hard minimum, enforced at compile time.
+
+1. **Record.** Connect a 3.3 V USB-serial adapter to the debug UART (`PA2` TX / `PA3` RX + GND), or
+   a serial-to-microSD logger on the same pins, and log at 115200 baud, e.g.:
+
+   ```bash
+   pio device monitor -b 115200 --filter log2file
+   ```
+
+   Each line is `T,t_ms,ohm,degC,volt,bar,situation,flap,ack` (every 500 ms); `#` lines give the
+   firmware revision and the floors in use (repeated every minute). Log a few drives on a
+   **healthy engine** with the oil you normally run: cold start, warm idle, and a **hot idle right
+   after a sustained drive** (the lowest pressure the engine sees). Two minutes of data per
+   temperature band is the minimum.
+2. **Analyse.**
+
+   ```bash
+   python scripts/analyze_log.py logs/*.log --plot calib.png
+   ```
+
+   Prints pressure statistics per 10 °C, the hot-idle pressure (P5) per §4 band, overpressure
+   margin and time spent hot, and proposes `pressCritical[]` / `pressRearm[]` (alarm at 50 % of
+   P5 by default, `--alarm-ratio` to change). `--plot` needs matplotlib.
+3. **Apply.** Review the numbers and the plot, then `--apply` writes the floors into
+   `lib/decision/decision.cpp` (or edit them by hand). Run the tests, rebuild, flash, and open a PR.
+
+Re-run after an oil change to a different viscosity. Learning is deliberately not continuous: it
+would hide slow wear.
 
 ## Status
 

@@ -40,6 +40,14 @@ constexpr float TEMP_NORMAL                 = 70.0f;    // normal band start
 constexpr float PRESS_STOP_ENGINE           = 1.2f;     // stop-engine pressure
 constexpr float PRESS_OVER                  = 9.5f;     // overpressure ceiling
 
+// ----- Low-pressure floors (§4) -----
+// Generic idle-type floors per temperature band (0:<70 1:70-89 2:90-110
+// 3:110-122 4:>122). They are the HARD MINIMUM: a vehicle calibration
+// (scripts/analyze_log.py, README "Calibration") may raise the floors used in
+// decision.cpp, never lower them; a static_assert there enforces it.
+constexpr float PRESS_CRITICAL_MIN[5] = {1.5f, 0.9f, 0.8f, 0.6f, 1.2f}; // alarm below
+constexpr float PRESS_REARM_MIN[5]    = {1.8f, 1.1f, 1.0f, 0.8f, 1.2f}; // clear at/above
+
 // ----- Alert hysteresis (§5): enter at the threshold, clear only past these -----
 constexpr float TEMP_OVERHEAT_CLEAR         = 108.0f;   // mild overheat clears below
 constexpr float PRESS_OVER_CLEAR            = 9.2f;     // overpressure clears at/below
@@ -80,8 +88,10 @@ float pressureFromVoltage(float vPressure);
 // Temperature band index: 0:<70  1:70-89  2:90-110  3:110-122  4:>122
 uint8_t temperatureBand(float temperature);
 
-// Low-pressure alarm threshold for this temperature (§4 "critique sous").
+// Low-pressure alarm threshold for this temperature (§4 "critique sous") and the
+// pressure at/above which the alarm clears (§4 "réarmement").
 float lowPressCritical(float temperature);
+float lowPressRearm(float temperature);
 
 // Adaptive low-pressure alarm with per-band hysteresis (§4); returns next state.
 bool nextLowPressAlarm(bool prev, float temperature, float pressure);

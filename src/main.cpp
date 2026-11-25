@@ -34,6 +34,12 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &OLED_I2C, OLED_RESET);
 const uint32_t DISPLAY_PERIOD_MS   = 500; // OLED refresh
 const uint32_t TOAST_MS            = 1500; // header message after a long press
 const uint32_t TELEMETRY_PERIOD_MS = 500; // CSV line on the debug Serial
+const uint32_t TELEMETRY_HEADER_MS = 60000; // repeat the header for logs started mid-drive
+
+#ifndef FW_GIT_REV
+#define FW_GIT_REV "unknown" // set by scripts/git_rev.py at build time
+#endif
+void printTelemetryHeader(); // defined with the telemetry below; also printed at boot
 
 // ----- HARDWARE Constants -----
 const float VREF = 3.3f;
@@ -419,8 +425,7 @@ void setup() {
     } else {
         bootAndInit();
     }
-    // Telemetry header (one "T," line per TELEMETRY_PERIOD_MS, see printTelemetry).
-    Serial.println("# T,t_ms,ohm,degC,volt,bar,situation,flap,ack");
+    printTelemetryHeader();
 }
 
 void bootAndInit() {
@@ -719,6 +724,22 @@ void updateDisplay(const RunResult& r, float resistance, float vPressure, uint32
 }
 
 // ----- TELEMETRY -----
+// Header lines start with '#': firmware revision, the low-pressure floors in use
+// (one per §4 band) and the column names. scripts/analyze_log.py reads them.
+void printTelemetryHeader() {
+    static const float bandTemps[5] = {50.0f, 80.0f, 100.0f, 115.0f, 130.0f}; // one per §4 band
+    Serial.print("# STM-Auto fw ");
+    Serial.print(FW_GIT_REV);
+    Serial.print(" built " __DATE__ " " __TIME__);
+    Serial.println();
+    Serial.print("# floors crit=");
+    for (uint8_t b = 0; b < 5; b++) { if (b) Serial.print(';'); Serial.print(lowPressCritical(bandTemps[b]), 2); }
+    Serial.print(" rearm=");
+    for (uint8_t b = 0; b < 5; b++) { if (b) Serial.print(';'); Serial.print(lowPressRearm(bandTemps[b]), 2); }
+    Serial.println();
+    Serial.println("# T,t_ms,ohm,degC,volt,bar,situation,flap,ack");
+}
+
 // One CSV line per TELEMETRY_PERIOD_MS on the debug Serial, for bench calibration
 // and in-car logging: grep "^T," (header printed at the end of setup()).
 void printTelemetry(const RunResult& r, float resistance, float vPressure) {
@@ -845,5 +866,10 @@ void loop() {
     if (nowMs - lastTelemetryMs >= TELEMETRY_PERIOD_MS) {
         lastTelemetryMs = nowMs;
         printTelemetry(r, resistance, vPressure);
+    }
+    static uint32_t lastHeaderMs = 0;
+    if (nowMs - lastHeaderMs >= TELEMETRY_HEADER_MS) {
+        lastHeaderMs = nowMs;
+        printTelemetryHeader();
     }
 }

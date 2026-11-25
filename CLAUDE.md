@@ -20,6 +20,7 @@ pio run -e bluepill_f103c8 -t upload  # flash via ST-Link (upload_protocol = stl
 pio device monitor -b 115200          # serial monitor
 pio test -e native                    # run host unit tests (no hardware; needs host gcc)
 scripts\test-native-msvc.cmd          # same tests with MSVC (Windows, no gcc)
+python scripts/analyze_log.py LOG...  # telemetry logs -> calibrated §4 floors (--plot, --apply)
 pio run -t clean                      # clean
 ```
 
@@ -39,7 +40,7 @@ and calls into it:
   `nextSituationFilter()` (3-tick debounce), `activeAlertMask()` (every active alarm, for the
   multi-alarm display), `tempSensorFault()`/`pressSensorFault()`,
   `displaySituation()` (status label: REGULATING/NORMAL follow the flap), `temperatureBand()`,
-  `lowPressCritical()` (current §4 floor, drawn on the pressure graph),
+  `lowPressCritical()`/`lowPressRearm()` (current §4 floors; critical is drawn on the pressure graph),
   `situationAlert()`, `interpolate()` and the sensor scale tables. All pure functions taking state
   as parameters.
 - **`lib/run/run.{h,cpp}`** — `runTick()`: one RUN decision tick chaining the helpers (conversions →
@@ -89,7 +90,8 @@ and calls into it:
   `updateDisplay()` every 500 ms or at once after a gesture / carousel step (dispatches the view:
   main gauges via `drawGaugeRows()`, shared with the boot animation; temp/pressure trend graphs;
   session stats; diag. `showFrame()` calls `OLED_I2C.begin()` first for the STM32F103 I2C BUSY-flag
-  errata) and `printTelemetry()` (CSV `T,…` line every 500 ms on debug Serial). `main.cpp` holds
+  errata) and `printTelemetry()` (CSV `T,…` line every 500 ms on debug Serial; `printTelemetryHeader()` at
+  boot and every 60 s: `# STM-Auto fw <FW_GIT_REV>`, `# floors crit=… rearm=…`, column names). `main.cpp` holds
   `RunState run`, `ButtonState button`, `ViewState views`, the two `History` buffers, `stats`,
   `buzzerSounding`, `prevSituation`.
 - **Tests**: `test/test_*/` (Unity) run via `pio test -e native` against `lib/` — the `native` env
@@ -98,6 +100,11 @@ and calls into it:
 **Conventions to preserve:**
 - `lib/` modules stay Arduino-free (pure functions, state passed in) so they build natively — keep
   hardware (Servo/OLED/ADC/SPI/tone) in `src/main.cpp`. Add a test when you add logic.
+- Low-pressure floors: `pressCritical[]`/`pressRearm[]` in `decision.cpp` are the vehicle-calibrated
+  values (`scripts/analyze_log.py --apply` rewrites them — keep the `static constexpr float
+  pressCritical[] = {…}` form it matches). They must stay >= `PRESS_CRITICAL_MIN`/`PRESS_REARM_MIN`
+  (decision.h, enforced by `static_assert`); tests compare against `lowPressCritical()`/
+  `lowPressRearm()`, never hardcoded floor values.
 - Interpolation x-tables (`resTable`, `vPressureTable` in `lib/decision/decision.cpp`) **must stay
   strictly increasing**, each in sync with its y-table (`tempTable`, `barTable`) — `interpolate()`
   assumes it.
@@ -131,6 +138,6 @@ Wired but not yet coded: CAN.
 
 ## Layout & workflow
 
-- `src/` firmware · `lib/` pure modules · `test/` Unity suites · `scripts/` MSVC test runner · `kicad/stm-auto/` schematic+PCB · `sounds/` MP3 voice files (tracks 1-5, §7) · `.pio/` build (gitignored).
+- `src/` firmware · `lib/` pure modules · `test/` Unity suites · `scripts/` MSVC test runner + `analyze_log.py` calibration + `git_rev.py` (embeds `FW_GIT_REV`) · `kicad/stm-auto/` schematic+PCB · `sounds/` MP3 voice files (tracks 1-5, §7) · `.pio/` build (gitignored).
 - Feature-branch + PR into `main`; Conventional Commits referencing the issue (`#12 feat!: ...`).
 - Keep `pins.h` and `DECISION_MATRIX.md` in sync with code — both lead the firmware.

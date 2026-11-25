@@ -9,3 +9,4 @@ kicad/stm-auto/stm-auto-backups/
 kicad/stm-auto/~*.lck
 .DS_Store
 .claude/settings.local.json
+__pycache__/

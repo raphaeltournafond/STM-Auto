@@ -98,23 +98,36 @@ void test_temperatureBand_boundaries(void) {
     TEST_ASSERT_EQUAL_UINT8(4, temperatureBand(122.1f));
 }
 
-// ---------- low-pressure alarm hysteresis (§4, 70-89 band: crit 0.9 / rearm 1.1) ----------
+// ---------- low-pressure alarm hysteresis (§4) ----------
+// Relative to the floors so a vehicle calibration does not break the tests.
 
 void test_lowPressAlarm_trips_below_critical(void) {
-    TEST_ASSERT_TRUE(nextLowPressAlarm(false, 80.0f, 0.8f)); // below 0.9 -> trip
+    TEST_ASSERT_TRUE(nextLowPressAlarm(false, 80.0f, lowPressCritical(80.0f) - 0.05f));
 }
 
 void test_lowPressAlarm_stays_off_above_critical(void) {
-    TEST_ASSERT_FALSE(nextLowPressAlarm(false, 80.0f, 1.0f)); // above 0.9, not tripped
+    TEST_ASSERT_FALSE(nextLowPressAlarm(false, 80.0f, lowPressCritical(80.0f) + 0.05f));
 }
 
 void test_lowPressAlarm_holds_in_hysteresis_band(void) {
-    // already tripped, pressure recovered to 1.0 (between crit 0.9 and rearm 1.1) -> stays on
-    TEST_ASSERT_TRUE(nextLowPressAlarm(true, 80.0f, 1.0f));
+    // already tripped, pressure recovered between critical and rearm -> stays on
+    const float mid = 0.5f * (lowPressCritical(80.0f) + lowPressRearm(80.0f));
+    TEST_ASSERT_TRUE(nextLowPressAlarm(true, 80.0f, mid));
 }
 
 void test_lowPressAlarm_clears_at_rearm(void) {
-    TEST_ASSERT_FALSE(nextLowPressAlarm(true, 80.0f, 1.1f)); // >= rearm -> clear
+    TEST_ASSERT_FALSE(nextLowPressAlarm(true, 80.0f, lowPressRearm(80.0f))); // >= rearm -> clear
+}
+
+void test_lowPress_floors_never_below_minimums(void) {
+    // Runtime mirror of the static_assert in decision.cpp, per band.
+    const float bandTemps[5] = {50.0f, 80.0f, 100.0f, 115.0f, 130.0f};
+    for (int b = 0; b < 5; b++) {
+        TEST_ASSERT_EQUAL_UINT8(b, temperatureBand(bandTemps[b]));
+        TEST_ASSERT_TRUE(lowPressCritical(bandTemps[b]) >= PRESS_CRITICAL_MIN[b]);
+        TEST_ASSERT_TRUE(lowPressRearm(bandTemps[b]) >= PRESS_REARM_MIN[b]);
+        TEST_ASSERT_TRUE(lowPressRearm(bandTemps[b]) >= lowPressCritical(bandTemps[b]));
+    }
 }
 
 // ---------- overheat / overpressure latches (§5 hysteresis) ----------
@@ -154,7 +167,7 @@ void test_alarm_latches_evolve_when_sensors_ok(void) {
     TEST_ASSERT_FALSE(next.lowPress);
     TEST_ASSERT_TRUE(next.overheat);
     TEST_ASSERT_TRUE(next.overpressure);
-    next = nextAlarmLatches(none, true, 80.0f, 0.5f);               // 70-89 band, < 0.9 bar
+    next = nextAlarmLatches(none, true, 80.0f, lowPressCritical(80.0f) - 0.1f); // below the floor
     TEST_ASSERT_TRUE(next.lowPress);
 }
 
@@ -420,6 +433,7 @@ int main(int, char**) {
     RUN_TEST(test_lowPressAlarm_stays_off_above_critical);
     RUN_TEST(test_lowPressAlarm_holds_in_hysteresis_band);
     RUN_TEST(test_lowPressAlarm_clears_at_rearm);
+    RUN_TEST(test_lowPress_floors_never_below_minimums);
 
     RUN_TEST(test_overheat_trips_at_110);
     RUN_TEST(test_overheat_holds_until_below_108);

@@ -82,9 +82,10 @@ phases de vie, situations, seuils, sorties sur 4 canaux. Brochage : `src/pins.h`
 ## 4. Plancher de pression adaptatif (situation 4)
 
 Seuil « pression basse » fonction de la bande de température (évite les faux positifs en conduite
-sportive). Valeurs type ralenti.
+sportive). Valeurs type ralenti. Ce sont les **minimums génériques** (`PRESS_CRITICAL_MIN` /
+`PRESS_REARM_MIN`) : une calibration propre au véhicule peut les **relever**, jamais les baisser.
 
-| Bande température | Plancher OK | Critique sous | Réarmement |
+| Bande température | Plancher OK | Critique sous (min.) | Réarmement (min.) |
 |---|---|---|---|
 | < 70 °C | ≥ 2,0 bar | 1,5 bar | 1,8 bar |
 | 70–89 °C | ≥ 1,2 bar | 0,9 bar | 1,1 bar |
@@ -92,7 +93,22 @@ sportive). Valeurs type ralenti.
 | 110–122 °C | ≥ 0,8 bar | 0,6 bar | 0,8 bar |
 | > 122 °C | suspecte | combiné temp : < 1,2 bar | — |
 
-> RPM (CAN) à venir → relever ces planchers à mi (~3000) / haut (6000+) régime.
+**Calibration véhicule** (procédure : README « Calibration ») : enregistrer des trajets via la
+console série (lignes `T,…`), puis `scripts/analyze_log.py` mesure par bande la pression basse
+typique **P5** — à température donnée, la pression la plus basse est celle du ralenti — et propose :
+
+- critique = max(minimum générique, **50 % × P5**) ; réarmement = max(minimum, critique + écart
+  générique) ;
+- bande > 122 °C (couplée à l'arrêt moteur, §3) jamais modifiée ;
+- bande sans assez de données (< 2 min) : valeur actuelle conservée.
+
+La référence est **figée** : pas d'apprentissage continu (il masquerait une usure lente). Refaire la
+calibration volontairement, p. ex. après une vidange qui change de viscosité. Les valeurs retenues
+sont relues puis compilées dans `lib/decision/decision.cpp` ; un `static_assert` refuse toute valeur
+sous le minimum.
+
+> RPM (CAN) à venir → même méthode avec une table température × régime (repère forum : ~10 psi
+> soit ~0,7 bar par 1000 tr/min jugé « bon », 4–5 psi soit ~0,3 bar par 1000 tr/min « bas »).
 
 ## 5. Hystérésis
 
