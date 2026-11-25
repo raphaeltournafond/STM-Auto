@@ -50,6 +50,10 @@ uint8_t temperatureBand(float temperature) {
     return 4;                                      // > 122
 }
 
+float lowPressCritical(float temperature) {
+    return pressCritical[temperatureBand(temperature)];
+}
+
 bool nextLowPressAlarm(bool prev, float temperature, float pressure) {
     uint8_t b = temperatureBand(temperature);
     if (!prev && pressure < pressCritical[b])  return true;

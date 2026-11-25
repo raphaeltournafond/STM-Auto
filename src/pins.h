@@ -37,7 +37,7 @@
 #define PIN_DEBUG_RX      PA3   // USART2 RX
 
 // USER INPUT — capacitive touch module (VCC/GND/OUT); OUT idle LOW, HIGH on touch
-#define PIN_ACK_BUTTON    PB5   // acknowledge; plain INPUT (module drives it), rising edge
+#define PIN_ACK_BUTTON    PB5   // ACK / view tap / carousel long press; plain INPUT (module drives it)
 
 // STATUS
 #define PIN_WS2812_DATA   PB15  // RGB LED via SPI2 MOSI (blocking 9-byte transfer); level-shift to 5V (or supply ~4.3V)

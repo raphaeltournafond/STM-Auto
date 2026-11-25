@@ -107,8 +107,10 @@ sportive). Valeurs type ralenti.
 
 ## 6. Acquittement
 
-- **Bouton tactile** : acquitte l'alarme courante → coupe son + voix, **garde** écran + LED tant que
-  la condition persiste. Tant que l'ack tient, la voix d'une nouvelle situation de priorité
+- **Bouton tactile** : un appui pendant une alerte **non acquittée** acquitte l'alarme courante
+  (dès l'appui, sans attendre le relâcher) → coupe son + voix, **garde** écran + LED tant que la
+  condition persiste. Cet appui ne sert à rien d'autre (ni changement de vue, ni carrousel). Hors
+  alerte ou alerte déjà acquittée, le bouton navigue entre les vues (§10). Tant que l'ack tient, la voix d'une nouvelle situation de priorité
   inférieure ou égale n'est pas jouée.
 - Une situation **nouvelle de priorité supérieure** repart en son malgré un ack précédent.
 - **Retour auto** au nominal dès que la condition disparaît.
@@ -142,6 +144,32 @@ Un `.mp3` numéroté par message. Langue : *à confirmer (français présumé)*.
 Alim : 12 V→5 V externe → servos + capteur pression + STM32 (broche 5 V) ; 3,3 V carte → OLED + CAN ;
 masses communes ; 470 µF par servo. CAN = broches USB → retirer le pull-up USB sur PA12.
 USART1 = MP3, USART2 = console de débogage (`Serial` remappé via `build_flags`).
+
+## 10. Écrans (vues) et carrousel
+
+Un seul bouton : l'acquittement reste prioritaire (§6). Gestes **hors alerte en attente d'ACK** :
+
+| Geste | Action |
+|---|---|
+| Appui court (relâché avant 1,5 s) | Vue suivante (toutes les vues, en boucle) |
+| Appui long (≥ 1,5 s, déclenché sans relâcher) | Carrousel on/off — 2 bips courts = on, 1 bip long = off, message en tête d'écran 1,5 s |
+
+| # | Vue | Contenu | Carrousel |
+|---|---|---|---|
+| 1 | Principale | Ligne d'état + jauges température / pression (écran d'alarme) | oui |
+| 2 | Température | Valeur + courbe ~10 min (1 point / 5 s), max / min de la fenêtre | oui |
+| 3 | Pression | Valeur + courbe ~10 min + plancher d'alarme courant §4 en pointillés | oui |
+| 4 | Session | T max, P max, P min huile chaude (≥ 70 °C), temps ≥ 110 °C, durée | oui |
+| 5 | Diagnostic | Ω / V bruts, T / P, situation, volet, ack, plancher, reset watchdog | non (banc) |
+
+- **Carrousel** : vue suivante toutes les **5 s** (vue Diagnostic sautée). Un appui court
+  avance d'une vue et relance le délai.
+- **Alerte non acquittée** : la vue principale est **imposée** et le carrousel suspendu (le délai
+  repart à la fin de l'alerte). Après ACK, la navigation reprend et l'alerte reste en ligne d'état,
+  inversée, sur toutes les vues.
+- Au démarrage : vue principale, carrousel off (rien n'est mémorisé entre deux mises sous
+  tension). Statistiques et courbes repartent à zéro ; les mesures en défaut capteur sont ignorées
+  (statistiques) ou laissent un trou (courbes).
 
 ## 9. Points ouverts
 
